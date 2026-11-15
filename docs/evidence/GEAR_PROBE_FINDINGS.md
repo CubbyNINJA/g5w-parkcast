@@ -40,14 +40,25 @@ What this shows for the parking gate:
   came during the N prompt, so the shifts may have lagged the prompts.
 - The parking-brake signal is no use on this car: it read 0 the whole time.
 
-## The stock interfaces
+## The stock interface (from the framework, 2026-11-15)
 
-`automotive.odex`, pulled from this unit, holds the candidates: `com.hkmc.micom.ISystemListener`
-and `SystemListener` (with `ISystemService`), and `com.hkmc.bcm.BCMGearStatusInfoListener`. The
-method names present are `onGearStatus`, `onGearPStatus`, `onGearStatusInfoChanged`,
-`onGearChanged`, `getGearPStatus` and `getGearStatus`. Which interface declares which method
-isn't pinned yet; that needs the framework decompiled. `getGearPStatus` may be a real getter that
-returns the P state directly.
+The unit's `automotive.odex` and `automotive-service.odex` were read with a stdlib DEX reader
+(class and method metadata, static constants and the service methods' bytecode). Nothing was run
+on the car.
+
+| Item | Finding |
+|---|---|
+| Service | `com.hkmc.micom.system`, interface `com.hkmc.micom.ISystemService`. Confirmed on the unit by `service-list.txt` (gear-probe), line 57. |
+| Subscribe | `ISystemService.addListener(ISystemListener)`, transaction 1; `removeListener`, transaction 2. |
+| Callbacks | `com.hkmc.micom.ISystemListener` (descriptor `com.hkmc.micom.ISystemListener`), one-way: `onGearPStatus(int)` transaction 27, `onGearStatus(int)` transaction 17. |
+| Getter | `int ISystemService.getGearPStatus()`, transaction 36. The service returns its cached P state; it sends no request to the MICOM. |
+| Public wrapper | `com.hkmc.micom.VehicleInfoManager(Context)` with `addListener`/`removeListener(VehicleInfoListener)` and `getGearPStatus()`. `VehicleInfoListener` is a plain class with `onGearPStatus(int)` and `onGearStatus(int)`. |
+| Permission | None found. Neither the framework classes nor `SystemService.addListener`/`getGearPStatus` check one; `addListener` only logs the caller's PID and links to its death. |
+| Delivery | `onGearPStatus` is sent only when the P state changes. On `addListener` the service replays the current gear, parking and speed state, but **not** `onGearPStatus`, so a new subscriber reads the starting state with `getGearPStatus`. |
+| Not getters | BCM `getGearStatusInfo()` returns `void`: it only requests the data, which then arrives on `IBCMListener.onGearStatusInfoChanged(int, int)`. That's why the probe's readings were empty. |
+
+So the receiver can subscribe to `onGearPStatus` for changes and call `getGearPStatus` for the
+starting state, and to re-confirm Park while nothing changes.
 
 ## Build identity (AMB-32)
 
@@ -74,7 +85,8 @@ locking when it's shifted out of Park; nothing the probe calls touches the locks
 ## Not verified
 
 - Which of `VCU_GearPosSta` 5 and 6 is N and which is D.
-- Which interface declares `onGearStatus` and `onGearPStatus`, whether an app can register for
-  it, and with what permission.
-- Whether `getGearPStatus` returns the P state when called.
+- Whether an ordinary app can load `VehicleInfoManager`: that depends on `automotive.jar` being on
+  the boot class path or needing `<uses-library>`. Raw binder calls work either way.
+- Whether SELinux or the service manager restrict an app's binder calls (Android 4.4).
+- What `getGearPStatus` returns on the live unit, in and out of Park.
 - Any build other than 260206.
