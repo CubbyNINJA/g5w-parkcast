@@ -31,7 +31,7 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
       | -vrtp  |
       | -artp  |
 
-  @offline @failure @AIR-013 @AIR-031 @AT-13 @AT-31
+  @offline @failure @AIR-013 @AIR-031 @AT-13 @AT-31 @OD-28
   Scenario Outline: A request to pass a capture option to UxPlay is refused
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     When the runner is started with the extra argument "<option>"

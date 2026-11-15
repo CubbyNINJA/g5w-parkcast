@@ -74,20 +74,20 @@ Feature: GO, NO-GO or INCONCLUSIVE, with the reason and the lines behind it
       | INCONCLUSIVE               | INCONCLUSIVE |
       | INCONCLUSIVE, INCONCLUSIVE | INCONCLUSIVE |
 
-  @offline @failure @AIR-009 @AIR-010 @AT-09 @AT-10 @OD-17
+  @offline @failure @AIR-009 @AIR-010 @AIR-028 @AT-09 @AT-10 @AT-28 @OD-17
   Scenario Outline: Whole-log damage overrides otherwise decisive session evidence
     Given a run containing a complete session whose verdict is <session verdict>
     And the log as a whole is <damage>
     When the evaluator judges the run
     Then the run's verdict is INCONCLUSIVE with the reason "evidence error"
-    And the limitation "<damage>" is named
+    And the limitation "<limitation>" is named
 
     Examples:
-      | session verdict | damage            |
-      | GO              | truncated         |
-      | GO              | partly unreadable |
-      | NO-GO           | truncated         |
-      | NO-GO           | partly unreadable |
+      | session verdict | damage            | limitation |
+      | GO              | truncated         | truncated  |
+      | GO              | partly unreadable | unreadable |
+      | NO-GO           | truncated         | truncated  |
+      | NO-GO           | partly unreadable | unreadable |
 
   @offline @boundary @AIR-008 @AIR-010 @AT-08 @AT-10 @OD-09 @OD-10
   Scenario Outline: Changing an owner observation changes neither verdict level

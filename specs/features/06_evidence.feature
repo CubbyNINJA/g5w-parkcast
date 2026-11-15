@@ -80,14 +80,14 @@ Feature: What the run keeps, what it publishes, and what it claims
     And the owner's iPhone on iOS 27 on the same network
     When the runner launches "HU-Test" and the owner starts Screen Mirroring to it
     And the owner ends the test
-    Then the run's folder under "runs/" holds the log, the analyser report, every session verdict and the run verdict
+    Then the live run's folder under "runs/" holds the log, the analyser report, every session verdict and the run verdict
     And the recorded launch command is the one the offline launch scenarios specify
     And the run records the launch time, the deadline 600 seconds later, the end time and the reason "owner ended"
     And no UxPlay process launched by the run is still running
     And no rule the runner owns remains in the firewall
     And the log starts with the runner's start marker and ends with its end marker and a newline
     And the owner's sound note and the iOS version with its build, marked "owner-entered", are recorded
-    And the run's folder, the build tree and the runner's working directory hold no video, image or stream dump file
+    And the live run's folder, the build tree and the working directory hold no video, image or stream dump file
 
   @pc @normal @AIR-008 @AIR-009 @AIR-010 @AIR-011 @AIR-029 @AT-08 @AT-09 @AT-10 @AT-11 @AT-29
   Scenario: The live run's saved results agree with its own log
@@ -101,6 +101,6 @@ Feature: What the run keeps, what it publishes, and what it claims
   @pc @normal @AIR-010 @AIR-014 @AT-10 @AT-14
   Scenario: The H.264 feasibility gate needs an evidenced GO
     Given the most recent live run under "runs/" whose saved results agree with its own log
-    Then the run's verdict is GO
+    Then the saved run verdict is GO
     And a GO session cites a "*** codec is h264" line in the retained log
     And the summary names the tier "pc", the build's commit, the iOS version with its build, and says the head unit is untested

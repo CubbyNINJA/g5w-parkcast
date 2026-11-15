@@ -8,7 +8,7 @@ Feature: A temporary firewall rule for uxplay.exe only
     Given the build root recorded in the provenance is "C:\uxplay-s1\"
     And the runner owns a rule only if it is named "NEMESIS-AirPlay-S1" and its program is a uxplay.exe under that root
 
-  @offline @normal @AIR-003 @AIR-030 @AT-03 @AT-30
+  @offline @normal @AIR-003 @AIR-030 @AT-03 @AT-30 @OD-27
   Scenario: Every leftover owned rule is removed before the run's rule is created
     Given the firewall holds 2 owned rules left by earlier runs
     And the firewall holds an unrelated rule named "Steam"
@@ -25,7 +25,7 @@ Feature: A temporary firewall rule for uxplay.exe only
     And no new rule is created
     And UxPlay is never launched
 
-  @offline @failure @AIR-030 @AT-30
+  @offline @failure @AIR-030 @AT-30 @OD-27
   Scenario: A rule with the runner's name but another program is reported and left alone
     Given the firewall holds a rule named "NEMESIS-AirPlay-S1" for the program "C:\Tools\other.exe"
     When a test run starts
@@ -52,7 +52,7 @@ Feature: A temporary firewall rule for uxplay.exe only
     And the run reports that the firewall rule could not be created
     And cleanup runs
 
-  @offline @normal @AIR-005 @AIR-030 @AT-05 @AT-30
+  @offline @normal @AIR-005 @AIR-030 @AT-05 @AT-30 @OD-27
   Scenario Outline: Only the run's rule is removed, and the removal checked, however the run ends
     Given the firewall holds an unrelated rule named "Steam"
     And a test run whose firewall rule was created

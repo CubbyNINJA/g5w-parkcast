@@ -1,4 +1,4 @@
-@S1
+@S1 @OD-28
 Feature: One command, with predictable exits and no side effects on bad input
   The S1 tools are one command, "python tools/s1.py", with the commands check, build, run,
   analyse, evaluate and summary. Usage errors change nothing; other failures stop before the

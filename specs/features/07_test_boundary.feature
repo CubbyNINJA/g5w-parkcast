@@ -8,14 +8,14 @@ Feature: The Gherkin exception stays inside this project
   Scenario: A layout whose only Gherkin is inside this project passes the boundary check
     Given a synthetic repository with feature files and pytest_bdd imports only under "Sources/airplay-receiver/"
     When the boundary check runs on it
-    Then the check passes
+    Then the boundary check passes
 
   @offline @failure @AIR-015 @AT-15
   Scenario Outline: Gherkin outside this project fails the boundary check
     Given a synthetic repository with feature files and pytest_bdd imports only under "Sources/airplay-receiver/"
     But it also has <extension> at "<path>"
     When the boundary check runs on it
-    Then the check fails naming "<path>"
+    Then the boundary check fails naming "<path>"
 
     Examples:
       | extension                           | path                              |
@@ -41,5 +41,5 @@ Feature: The Gherkin exception stays inside this project
   Scenario: The real repository keeps the main suite free of Gherkin
     Given hmg_nemesis's real source tree
     When the boundary check runs on it
-    Then the check passes
-    And the main suite's requirements name neither pytest-bdd nor any Gherkin package
+    Then the boundary check passes
+    And the main suite "Sources/tests/unit" collects without error where pytest_bdd can't be imported

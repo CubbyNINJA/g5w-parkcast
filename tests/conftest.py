@@ -20,7 +20,9 @@ try:
 except ImportError:  # outside this project's .venv
     collect_ignore_glob = ["*.py"]
 else:
-    from steps import *  # noqa: F401,F403  pytest-bdd finds step definitions through conftest's namespace
+    # Each module's steps and the world fixture register as plugins, so pytest-bdd sees all of them.
+    pytest_plugins = ["steps.world", "steps.build_steps", "steps.run_steps", "steps.log_steps",
+                      "steps.evidence_steps", "steps.boundary_steps", "steps.cli_steps", "steps.live_steps"]
 
 
 def pytest_addoption(parser):
