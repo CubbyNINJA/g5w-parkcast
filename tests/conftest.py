@@ -21,7 +21,7 @@ except ImportError:  # outside this project's .venv
     collect_ignore_glob = ["*.py"]
 else:
     # Each module's steps and the world fixture register as plugins, so pytest-bdd sees all of them.
-    pytest_plugins = ["steps.world", "steps.build_steps", "steps.run_steps", "steps.log_steps",
+    pytest_plugins = ["steps.world", "steps.build_steps", "steps.run_steps", "steps.prompt_steps", "steps.log_steps",
                       "steps.evidence_steps", "steps.boundary_steps", "steps.cli_steps", "steps.live_steps"]
 
 
@@ -32,17 +32,7 @@ def pytest_addoption(parser):
                      help="also run @pc scenarios (this PC's UxPlay build and the owner's iPhone)")
 
 
-def _elevated() -> bool:
-    try:
-        import ctypes
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except (AttributeError, OSError):
-        return False
-
-
 def pytest_collection_modifyitems(config, items):
-    if (config.getoption("--run-host") or config.getoption("--run-pc")) and not _elevated():
-        pytest.exit("--run-host and --run-pc need an elevated terminal (AGENTS.md)", returncode=4)
     for item in items:
         tags = {m.name for m in item.iter_markers()}
         if "unit" in tags:

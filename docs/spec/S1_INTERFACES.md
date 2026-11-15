@@ -42,14 +42,10 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
   `dest/inventory.json` (`ucrt64`, `packages`, `gst_elements`), and `build_clean(dest, pinned=None)`,
   which builds into a new `dest` and saves that build's provenance there, with `build_root=dest`.
 
-## `firewall`
+## Firewall
 
-- `RULE_NAME = "NEMESIS-AirPlay-S1"`.
-- `Rule` is a frozen dataclass: `name`, `program`, `direction` (`in`), `action` (`allow`),
-  `profiles` (tuple), `ports` (`None` means none named), and `id`.
-- `is_owned(rule, build_root)` applies OD-27. `FirewallError` is the error type.
-- The backend has `active_profile()`, `list_rules()`, `create(rule) -> Rule` (with its id) and
-  `remove(id)`. `WindowsFirewall()` is the real one.
+There is no firewall module. The S1 tools never create, change or remove a firewall rule
+(AIR-032, OD-31). Windows asks the owner the first time `uxplay.exe` listens.
 
 ## `logfile`
 
@@ -58,34 +54,35 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
 
 ## `runner`
 
-- `run(provenance, run_dir, firewall, launcher, clock, owner, timeout=600) -> RunRecord`.
-  - **Preflight (OD-29):** validate the provenance and the hash, and check that the run's output
-    locations can be written, before any firewall change.
-  - Remove stale owned rules, then confirm with a fresh listing that they're gone. A removal
-    that reports success but leaves the rule in that listing stops the run, as does a foreign
-    rule with the same name.
-  - Create the rule, open the log, write the start marker, and launch.
-  - If process creation raises, or capture fails after the rule exists (`CaptureError`, which
-    carries the started `proc`), report it, stop any launched process, and remove the rule and
-    verify its removal.
-  - Otherwise tell the owner what to do, and wait until the owner ends the test, UxPlay exits,
-    or the deadline passes.
-  - Stop UxPlay and wait for it to exit. Only after it has exited, write the end marker, then
-    remove the rule and verify its removal with a fresh listing.
-- It saves `run.json` and `firewall-before.json`, `firewall-during.json` and
-  `firewall-after.json` in `run_dir`.
+- `run(provenance, run_dir, launcher, clock, owner, timeout=600) -> RunRecord`. The order is:
+  1. **Preflight (OD-29, OD-39):** validate the provenance and the hash, and check that the
+     run's output locations can be written, before UxPlay is launched. A run that stops here
+     gives no firewall notice and no reminder (OD-35).
+  2. Open the log and write the start marker.
+  3. Tell the owner the firewall notice (AIR-034, OD-34). It says Windows may ask to allow
+     `uxplay.exe`, to tick Public networks and click Allow, and that no prompt may appear if an
+     allowance or block already exists. Its text contains `Public networks`.
+  4. Launch. If process creation raises, report it: no process was launched, so no reminder.
+     If capture fails after the process started (`CaptureError`, which carries the started
+     `proc`), report it and stop that process.
+  5. Otherwise tell the owner what to do, and wait until the owner ends the test, UxPlay exits,
+     or the deadline passes.
+  6. Stop UxPlay and wait for it to exit, or report the process it couldn't stop.
+  7. Only then write the end marker, and save `run.json`.
+  8. Last, tell the owner the reminder (AIR-033; OD-33, OD-35, OD-38). It names `uxplay.exe`,
+     the exact executable path launched and `Windows Defender Firewall > Allowed apps`, says to
+     remove that entry, and says a declined or closed prompt may have left a block entry there
+     too. Its text contains `Allowed apps`. It's never written into the log.
+- A keyboard interrupt during the wait still goes through steps 6 to 8.
 - `RunRecord` has `started`, `command`, `launched_at`, `deadline`, `ended_at`, `reason`,
-  `exit_code`, `errors`, `rule`, `cleanup_ran`, `cleanup_clean`, `residual_rule`,
-  `residual_pid`, `pid` and `to_dict()`. `run.json` holds `to_dict()`; the CLI's `run` command
-  adds `tier: "pc"`.
+  `exit_code`, `errors`, `residual_pid`, `pid`, `record_written` and `to_dict()`.
+  - `run.json` holds `to_dict()`, with `firewall: "owner-handled"` (AIR-033(d)) and the build's
+    `commit`. The CLI's `run` command adds `tier: "pc"`.
+  - If `run.json` can't be written, `record_written` is `False`, an error names the run record,
+    and the reminder is still given.
 - `launched_at` is the clock time when the process started, and `ended_at` is the clock time
   when the run decided to end, as the clock reported it (with a real clock, a timeout's
-  `ended_at` can be slightly after the deadline). Errors name the rule, its program, or the
-  process ID they concern.
-- Each `firewall-<k>.json` is a JSON list with one object per firewall rule, holding every
-  `Rule` field (`name`, `program`, `direction`, `action`, `profiles` as a list, `ports`, `id`).
-  It lists every rule, not only owned ones. `firewall-during.json` is listed after the run's
-  rule is created and before UxPlay is stopped.
+  `ended_at` can be slightly after the deadline). Errors name the process ID they concern.
 - `SubprocessLauncher` starts `uxplay.exe` directly, with no shell or wrapper process, so
   `proc.pid` is `uxplay.exe`'s own process ID, and Windows's command line for it is
   `subprocess.list2cmdline(argv)`.
@@ -98,7 +95,7 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
 - The clock has `now()` and `sleep(s)`.
 - The owner has `tell(msg)`, `ended(now) -> bool` and `ask(question) -> str | None`. The
   message to end the test mentions Enter.
-- Real backends are `SubprocessLauncher()`, `SystemClock()` and the console owner, plus
+- Real backends are `SubprocessLauncher()`, `SystemClock()` and `ConsoleOwner()`, plus
   `process_running(pid)`.
 
 ## `analyser`
@@ -136,6 +133,8 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
 - `summary(run_dir, tier) -> str` and `write_summary(dest_dir, run_dir, tier) -> Path`.
   - Summaries never contain client names, deviceIDs or addresses.
   - They name the tier (`Tier: <tier>`) and say the head unit is untested.
+  - They carry one line (the only one mentioning the firewall) saying the firewall allowance
+    was handled by the owner through Windows' prompt (OD-37).
   - An offline summary calls itself a synthetic fixture result that is not evidence about an
     iPhone, and makes no compatibility claim.
 - `screen_content(dirs)` lists video, image and stream-dump files. `latest_run(runs_root)`
@@ -149,10 +148,12 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
 ## `cli`
 
 - `main(argv, deps=None) -> int`, and
-  `Deps(work_root, runs_root, firewall, launcher, clock, owner, upstream, compiler, inventory)`.
+  `Deps(work_root, runs_root, launcher, clock, owner, upstream, compiler, inventory)`.
 - With no `deps`, it uses the real backends. `Deps.real(**overrides)` builds the real set with
-  some backends swapped. The live tests use it to put recording wrappers around the real firewall
-  and launcher. The runner only uses a process through `pid`, `poll()`, `stop()` and `alive`.
-- Commands: `check`, `build`, `run`, `analyse <log> [-o report]` and `evaluate <run-dir>`.
-  `evaluate` writes `report.json` and `verdict.json` beside the log, or neither. The last command
-  is `summary`.
+  some backends swapped. The live tests use it to put recording wrappers around the real
+  launcher and console owner. The runner only uses a process through `pid`, `poll()`, `stop()`
+  and `alive`.
+- Commands: `check`, `build`, `run`, `analyse <log> [-o report]`, `evaluate <run-dir>` and
+  `summary`.
+  - `evaluate` writes `report.json` and `verdict.json` beside the log, or neither.
+  - `run` runs the runner, then the analyser, the evaluator and the evidence writer.

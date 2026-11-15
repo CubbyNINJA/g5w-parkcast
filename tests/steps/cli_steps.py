@@ -14,13 +14,12 @@ from steps.fakes import s1
 from steps.world import PROJECT, SESSION, make_verified_build, read_json, snapshot, wrap
 
 Q = r'"(?P<{}>[^"]*)"'
-MUTATING = ("build.checkout", "build.compile", "fw.create", "fw.remove", "proc.start")
+MUTATING = ("build.checkout", "build.compile", "proc.start", "proc.create.failed")
 
 
 def _deps(w):
-    return s1("cli").Deps(work_root=w.work_root, runs_root=w.runs_root, firewall=w.firewall, launcher=w.launcher,
-                          clock=w.clock, owner=w.owner, upstream=w.upstream, compiler=w.compiler,
-                          inventory=lambda: None)
+    return s1("cli").Deps(work_root=w.work_root, runs_root=w.runs_root, launcher=w.launcher, clock=w.clock,
+                          owner=w.owner, upstream=w.upstream, compiler=w.compiler, inventory=lambda: None)
 
 
 def _cli(w, argv: list[str]) -> None:
@@ -71,14 +70,9 @@ def _(world):
     assert "usage" in world.err.lower()
 
 
-@then("no build starts, no firewall rule changes, UxPlay is never launched and no file is created or changed")
+@then("no build starts, UxPlay is never launched and no file is created or changed")
 def _(world):
     _no_changes(world)
-
-
-@then("no firewall rule changes and UxPlay is never launched")
-def _(world):
-    assert not world.events.of("fw.create", "fw.remove", "proc.start"), world.events
 
 
 @given(parsers.re("the build provenance file is (?P<state>missing|unreadable|not valid provenance)"))

@@ -1,10 +1,10 @@
 """Fakes for the S1 step definitions.
 
 Every fake writes what it was actually asked to do into one shared, ordered event list, with the
-controlled clock's time and immutable copies of the arguments and results. Steps check those
-events, not what the code under test says it did. Production types (Rule, FirewallError,
-BuildError, CaptureError) are imported lazily from airplay_s1, so a missing implementation fails
-a scenario rather than collection.
+controlled clock's time and immutable copies of the arguments. Steps check those events, not
+what the code under test says it did. Production types (BuildError, CaptureError) are imported
+lazily from airplay_s1, so a missing implementation fails a scenario rather than collection.
+There is no firewall fake: the S1 tools never touch the firewall (OD-31).
 """
 
 from __future__ import annotations
@@ -69,59 +69,6 @@ class FakeClock:
             self.t = max(self.t, t)
             fn()
         self.t = target
-
-
-def rule_fields(rule) -> dict:
-    """An immutable copy of a rule's fields, as the fake firewall received or returned it."""
-    d = dataclasses.asdict(rule)
-    d["profiles"] = tuple(d["profiles"])
-    return d
-
-
-class FakeFirewall:
-    """In-memory Windows Firewall. Rules are airplay_s1.firewall.Rule (a dataclass with an `id`).
-
-    Failure modes: fail_create, fail_remove (remove raises), remove_no_effect (remove returns
-    normally but the rule stays, as a backend that silently fails would)."""
-
-    def __init__(self, events: Events, profile: str = "Public"):
-        self.events = events
-        self.profile = profile
-        self.rules: dict[str, object] = {}
-        self.fail_create = False
-        self.fail_remove = False
-        self.remove_no_effect = False
-        self._ids = itertools.count(1)
-
-    def seed(self, rule) -> object:
-        rule = dataclasses.replace(rule, id=f"seed-{next(self._ids)}")
-        self.rules[rule.id] = rule
-        return rule
-
-    def active_profile(self) -> str:
-        return self.profile
-
-    def list_rules(self) -> list:
-        rules = list(self.rules.values())
-        self.events.add("fw.list", ids=tuple(r.id for r in rules), rules=tuple(rule_fields(r) for r in rules))
-        return rules
-
-    def create(self, rule):
-        asked = rule_fields(rule)
-        if self.fail_create:
-            self.events.add("fw.create.failed", asked=asked)
-            raise s1("firewall").FirewallError("creating firewall rules fails (fake)")
-        rule = dataclasses.replace(rule, id=f"run-{next(self._ids)}")
-        self.rules[rule.id] = rule
-        self.events.add("fw.create", id=rule.id, asked=asked)
-        return rule
-
-    def remove(self, rule_id: str) -> None:
-        self.events.add("fw.remove", id=rule_id)
-        if self.fail_remove:
-            raise s1("firewall").FirewallError("removing firewall rules fails (fake)")
-        if not self.remove_no_effect:
-            self.rules.pop(rule_id, None)
 
 
 class FakeProc:
@@ -223,17 +170,27 @@ class FakeLauncher:
 
 
 class FakeOwner:
-    """The owner at the console: messages shown, when the owner ends the test, answers to questions."""
+    """The owner at the console: messages shown, when the owner ends the test, answers to questions.
 
-    def __init__(self):
+    Each message is also an `owner.tell` event, with the run's log as it stood at that moment, so
+    steps can check what the owner was told before launch and after the end marker."""
+
+    def __init__(self, events: Events | None = None):
+        self.events = events
         self.messages: list[str] = []
         self.asked: list[str] = []
         self.answers: list[str | None] = ["27.0 (24A5260a)"]
         self.end_at: float | None = 1.0
         self.on_poll = None
+        self.log_path: Path | None = None
 
     def tell(self, message: str) -> None:
         self.messages.append(message)
+        if self.events is not None:
+            log = ""
+            if self.log_path is not None and self.log_path.is_file():
+                log = self.log_path.read_text(encoding="utf-8", errors="replace")
+            self.events.add("owner.tell", text=message, log=log)
 
     def ended(self, now: float) -> bool:
         if self.on_poll:

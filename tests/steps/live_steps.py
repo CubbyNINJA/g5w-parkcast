@@ -1,11 +1,11 @@
-"""@host and @pc steps for 02_firewall.feature and 06_evidence.feature.
+"""@pc steps for 06_evidence.feature: the live test with the owner's iPhone.
 
-They use the real backends: Windows Firewall, the real UxPlay build, this PC's clock and the owner
-at the console. They're skipped unless --run-host or --run-pc is given (tests/conftest.py).
+They use the real UxPlay build, this PC's clock and the owner at the console. The firewall is the
+owner's, through Windows' own prompt (OD-31). They're skipped unless --run-pc is given.
 
 The evidence doesn't rest on what the runner wrote about itself:
-- The firewall backend is wrapped in a test-owned recorder, and the steps also list the rules
-  themselves through PowerShell before and after the run.
+- The launcher and the console owner are wrapped in test-owned recorders, and Windows itself is
+  asked which uxplay.exe is running and with what command line.
 - A live scenario uses only the one run folder its own command created. Later scenarios use
   that same folder, or else the newest run folder recorded as a complete pc run.
 """
@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-from collections import Counter
 import re
 import signal
 import subprocess
@@ -23,7 +22,7 @@ from pathlib import Path
 
 from pytest_bdd import given, parsers, then, when
 
-from steps.fakes import Events, FakeOwner, rule_fields, s1
+from steps.fakes import Events, s1
 from steps.world import PROJECT, read_json
 
 Q = r'"(?P<{}>[^"]*)"'
@@ -35,38 +34,6 @@ KNOWN_MESSAGES = ("connection request from", "Client identified as User-Agent:",
                   "video is h265 but the -h265 option was not used", "audioFormat=0x")
 EXPECTED_FLAGS = [("-n", "HU-Test"), ("-nh",), ("-s", "1920x720@60"), ("-d",)]
 FORBIDDEN_FLAGS = {"-h265", "-vdmp", "-admp", "-vrtp", "-artp"}
-
-
-class RecordingFirewall:
-    """The real firewall backend, with every call and listing recorded by the test, and Windows's
-    own view of all rules (through PowerShell) taken just after the run's rule is created."""
-
-    def __init__(self, events: Events):
-        self.inner = s1("firewall").WindowsFirewall()
-        self.events = events
-        self.ps_during = None
-        self.ps_error = None
-
-    def active_profile(self):
-        return self.inner.active_profile()
-
-    def list_rules(self):
-        rules = self.inner.list_rules()
-        self.events.add("fw.list", ids=tuple(r.id for r in rules), rules=tuple(rule_fields(r) for r in rules))
-        return rules
-
-    def create(self, rule):
-        made = self.inner.create(rule)
-        self.events.add("fw.create", id=made.id, asked=rule_fields(rule))
-        try:
-            self.ps_during = _powershell_rules()
-        except Exception as e:  # the test's own check failed; that must not look like the runner's failure
-            self.ps_error = e
-        return made
-
-    def remove(self, rule_id):
-        self.events.add("fw.remove", id=rule_id)
-        return self.inner.remove(rule_id)
 
 
 class RecordedProc:
@@ -128,161 +95,6 @@ def _launched_os_row(world) -> dict:
     return rows[0]
 
 
-SNAPSHOT_PS1 = Path(__file__).with_name("firewall_snapshot.ps1")
-
-
-def _powershell_rules() -> list[dict]:
-    """Every firewall rule, with its program and port filters, as Windows itself lists it."""
-    out = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SNAPSHOT_PS1)],
-                         capture_output=True, encoding="utf-8-sig", check=True, timeout=600).stdout
-    assert out.strip(), "firewall_snapshot.ps1 listed no rules"
-    rows = json.loads(out)
-    return [{k: str(v) for k, v in r.items()} for r in (rows if isinstance(rows, list) else [rows])]
-
-
-def _ps_owned(row: dict, build_root) -> bool:
-    """OD-27, worked out here from Windows's own fields rather than by the code under test."""
-    root = str(Path(build_root).resolve()).lower().rstrip("\\") + "\\"
-    program = row["Program"].lower()
-    return (row["DisplayName"] == s1("firewall").RULE_NAME and program.endswith("\\uxplay.exe")
-            and program.startswith(root))
-
-
-def _ps_others(rows: list[dict], build_root) -> list[dict]:
-    return sorted((r for r in rows if not _ps_owned(r, build_root)), key=lambda r: r["Name"])
-
-
-def _ps_mine(rows: list[dict], build_root) -> list[tuple]:
-    """Owned rules as comparable tuples: name, program, direction, action, profile, ports."""
-    return sorted((r["DisplayName"], r["Program"].lower(), r["Direction"], r["Action"], r["Profile"], r["Ports"])
-                  for r in rows if _ps_owned(r, build_root))
-
-
-def _saved_mine(rows: list[dict], build_root) -> list[tuple]:
-    """The runner's saved rules in the same form, so the two views can be compared field by field."""
-    direction = {"in": "Inbound", "out": "Outbound"}
-    action = {"allow": "Allow", "block": "Block"}
-    out = []
-    for r in rows:
-        if _ps_owned({"DisplayName": r["name"], "Program": r["program"]}, build_root):
-            ports = "Any/Any" if r["ports"] is None else str(r["ports"])
-            out.append((r["name"], r["program"].lower(), direction[r["direction"]], action[r["action"]],
-                        ", ".join(r["profiles"]), ports))
-    return sorted(out)
-
-
-def _host_run(w, owner) -> None:
-    w.events = Events()
-    w.real_fw = RecordingFirewall(w.events)
-    w.real_launcher = RecordingLauncher(w.events)
-    w.ps_before = _powershell_rules()
-    w.saved_dir = None
-    w.host_run_dir = RUNS / time.strftime("host-%Y%m%d-%H%M%S")
-    w.record = s1("runner").run(w.provenance, w.host_run_dir, firewall=w.real_fw, launcher=w.real_launcher,
-                                clock=s1("runner").SystemClock(), owner=owner, timeout=600)
-    w.ps_after = _powershell_rules()
-    w.saved_dir = w.host_run_dir
-
-
-@given("this PC's Windows Firewall")
-def _(world):
-    world.provenance = s1("build").load_verified(s1("build").DEFAULT_WORK_ROOT)
-    world.build_root = world.provenance.build_root
-
-
-@given("an owned rule deliberately left from an earlier run")
-def _(world):
-    fw = s1("firewall")
-    world.leftover = fw.WindowsFirewall().create(fw.Rule(
-        name=fw.RULE_NAME, program=str(Path(world.build_root) / "stale" / "uxplay.exe"), direction="in",
-        action="allow", profiles=("Public",), ports=None))
-
-
-@when("a test run starts and the owner cancels it at once")
-def _(world):
-    owner = FakeOwner()
-    owner.end_at = None
-    owner.on_poll = lambda now: owner.end_at is None and setattr(owner, "end_at", now + 3)
-    _host_run(world, owner)
-
-
-@when("a test run starts and its UxPlay process is killed from outside the runner")
-def _(world):
-    owner = FakeOwner()
-    owner.end_at = None
-    seen = {}
-
-    def poll(now):
-        procs = world.real_launcher.procs
-        if procs and "at" not in seen:
-            seen["at"] = now
-        elif procs and now - seen["at"] >= 3 and "killed" not in seen:
-            seen["killed"] = True
-            os.kill(_launched_os_row(world)["ProcessId"], signal.SIGTERM)
-        if "killed" in seen and now - seen["at"] > 60:
-            owner.end_at = now  # safety net: never leave the receiver running if the runner misses the exit
-    owner.on_poll = poll
-    world.killed = seen
-    _host_run(world, owner)
-
-
-@then("the firewall rule lists from before, during and after the run are saved")
-def _(world):
-    saved = {k: read_json(world.saved_dir / f"firewall-{k}.json") for k in ("before", "during", "after")}
-    windows = {"before": world.ps_before, "during": world.real_fw.ps_during, "after": world.ps_after}
-    assert world.real_fw.ps_error is None, f"the test's own firewall check failed: {world.real_fw.ps_error}"
-    assert windows["during"] is not None, "the run's rule was never created"
-    for k in saved:
-        assert _saved_mine(saved[k], world.build_root) == _ps_mine(windows[k], world.build_root), \
-            f"firewall-{k}.json doesn't match Windows's own rules at that point"
-        assert Counter(r["name"] for r in saved[k]) == Counter(w["DisplayName"] for w in windows[k]), \
-            f"firewall-{k}.json doesn't list every rule Windows had at that point"
-    world.saved_lists = saved
-
-
-@then("they show the leftover rule removed before the run's rule was created")
-def _(world):
-    created = world.events.first("fw.create")
-    removed = world.events.first("fw.remove", id=world.leftover.id)
-    assert 0 <= removed < created
-    checks = [e for e in world.events[removed + 1:created] if e["kind"] == "fw.list"]
-    assert checks and world.leftover.id not in checks[-1]["ids"]
-    leftover = world.leftover.program.lower()
-    assert leftover in [m[1] for m in _ps_mine(world.ps_before, world.build_root)], "Windows never had the leftover"
-    assert leftover not in [m[1] for m in _ps_mine(world.real_fw.ps_during, world.build_root)]
-
-
-@then("they show the run's rule inbound, for only the built uxplay.exe and on the Public profile while the run was active")
-def _(world):
-    asked = world.events.of("fw.create")[0]["asked"]
-    assert (asked["direction"], asked["action"], asked["ports"]) == ("in", "allow", None)
-    assert asked["program"] == world.provenance.executable
-    assert asked["profiles"] == ("Public",)
-    during = _ps_mine(world.real_fw.ps_during, world.build_root)
-    assert during == [(s1("firewall").RULE_NAME, world.provenance.executable.lower(), "Inbound", "Allow", "Public",
-                       "Any/Any")], during
-    assert [r["Enabled"] for r in world.real_fw.ps_during if _ps_owned(r, world.build_root)] == ["True"]
-
-
-@then("they show no owned rule after the run")
-@then("they show the run's rule while the run was active and no owned rule after it")
-def _(world):
-    assert len(world.events.of("fw.create")) == 1
-    assert len(_ps_mine(world.real_fw.ps_during, world.build_root)) == 1
-    assert _ps_mine(world.ps_after, world.build_root) == []
-
-
-@then("they show every rule the runner doesn't own unchanged")
-def _(world):
-    assert _ps_others(world.ps_before, world.build_root) == _ps_others(world.ps_after, world.build_root)
-
-
-@then("the run reports UxPlay exiting mid-test")
-def _(world):
-    assert world.killed.get("killed")
-    assert world.record.reason == "uxplay exited"
-
-
 # --- @pc: the live test with the owner's iPhone ----------------------------------------------
 
 @given("the verified build and this PC's network")
@@ -295,22 +107,37 @@ def _(world):
     pass  # the owner's own setup; the runner asks for the exact version and build afterwards
 
 
+class RecordingOwner:
+    """The real console owner, with every message recorded by the test, in order with the launch."""
+
+    def __init__(self, events: Events):
+        self.inner = s1("runner").ConsoleOwner()
+        self.events = events
+
+    def tell(self, message):
+        self.events.add("owner.tell", text=message)
+        return self.inner.tell(message)
+
+    def ended(self, now):
+        return self.inner.ended(now)
+
+    def ask(self, question):
+        return self.inner.ask(question)
+
+
 def _live(world, expect_reason: str) -> None:
     RUNS.mkdir(exist_ok=True)
     world.events = Events()
-    world.real_fw = RecordingFirewall(world.events)
     world.real_launcher = RecordingLauncher(world.events)
-    world.build_root = world.provenance.build_root
-    world.ps_before = _powershell_rules()
+    world.real_owner = RecordingOwner(world.events)
     before = {p.name for p in RUNS.iterdir() if p.is_dir()}
-    world.live_rc = s1("cli").main(["run"], deps=s1("cli").Deps.real(firewall=world.real_fw,
-                                                                      launcher=world.real_launcher))
-    world.ps_after = _powershell_rules()
+    world.live_rc = s1("cli").main(["run"], deps=s1("cli").Deps.real(launcher=world.real_launcher,
+                                                                      owner=world.real_owner))
     new = [RUNS / n for n in {p.name for p in RUNS.iterdir() if p.is_dir()} - before]
     world.new_runs = new
     world.expect_reason = expect_reason
     if len(new) == 1:
-        world.live_dir = world.saved_dir = LIVE["dir"] = new[0]
+        world.live_dir = LIVE["dir"] = new[0]
 
 
 @when(parsers.re("the runner launches " + Q.format("name") + ", the owner starts Screen Mirroring to it and then ends the test at the console"))
@@ -392,10 +219,23 @@ def _(world):
     assert not [l for l in res.stdout.splitlines() if l.split(",")[1:2] == [f'"{pid}"']], f"process {pid} is still running"
 
 
-@then("no rule the runner owns remains in the firewall")
+@then("the owner was told about Windows' prompt before UxPlay started")
 def _(world):
-    assert _ps_mine(world.ps_after, world.build_root) == []
-    assert _ps_others(world.ps_before, world.build_root) == _ps_others(world.ps_after, world.build_root)
+    start = world.events.first("proc.start")
+    assert start >= 0, "the test saw no launch"
+    notices = [e for e in world.events[:start] if e["kind"] == "owner.tell" and "Public networks" in e["text"]]
+    assert len(notices) == 1 and "uxplay.exe" in notices[0]["text"]
+
+
+@then("the owner was reminded to remove the launched uxplay.exe's allowance after UxPlay stopped")
+def _(world):
+    stopped = world.real_launcher.stop_times
+    assert stopped, "the test saw no stop request"
+    told = [e for e in world.events if e["kind"] == "owner.tell" and "Allowed apps" in e["text"]]
+    assert len(told) == 1
+    assert world.provenance.executable in told[0]["text"] and "Windows Defender Firewall" in told[0]["text"]
+    start = world.events.first("proc.start")
+    assert world.events.index(told[0]) > start
 
 
 @then("the log starts with the runner's start marker and ends with its end marker and a newline")

@@ -1,12 +1,11 @@
-"""Steps for 02_firewall.feature and 03_runner.feature (AIR-003 to AIR-007, AIR-028, AIR-030).
+"""Steps for 03_runner.feature, and the run steps shared with 02 and 08 (AIR-006, AIR-007, AIR-013,
+AIR-028).
 
-Launch and rule checks read what the fakes actually received (launcher.argv, the fw.create
-event's copy of the rule), then check that the run record agrees with it.
+Launch checks read what the fake launcher actually received (launcher.argv), then check that the
+run record agrees with it. The runner takes no firewall backend (OD-31).
 """
 
 from __future__ import annotations
-
-import dataclasses
 
 from pytest_bdd import given, parsers, then, when
 
@@ -16,31 +15,6 @@ from steps.world import (CODEC_H264, CONNECT, EXPECTED_FLAGS, FORBIDDEN_FLAGS, L
 
 Q = r'"(?P<{}>[^"]*)"'
 N = r"(?P<{}>\d+)"
-
-
-def _owned_rule(w, n: int):
-    fw = s1("firewall")
-    return fw.Rule(name=fw.RULE_NAME, program=str(w.build_root / f"old-{n}" / "build" / "uxplay.exe"),
-                   direction="in", action="allow", profiles=("Public",), ports=None)
-
-
-def _created_events(w) -> list[dict]:
-    return w.events.of("fw.create")
-
-
-def _run_rule_id(w):
-    created = _created_events(w)
-    assert created, "the run never created its rule"
-    return created[0]["id"]
-
-
-def _removed_then_listed_absent(w, rule_id: str) -> int:
-    """The rule was removed, and a later listing (taken from the fake, not the runner) shows it gone."""
-    removed = w.events.first("fw.remove", id=rule_id)
-    assert removed >= 0, f"{rule_id} was never removed"
-    later = [e for e in w.events[removed + 1:] if e["kind"] == "fw.list"]
-    assert later and rule_id not in later[0]["ids"], "removal wasn't checked by listing again"
-    return w.events.index(later[0])
 
 
 def _argv(w) -> list[str]:
@@ -54,6 +28,11 @@ def _argv(w) -> list[str]:
 def _contains(cmd: list[str], words) -> bool:
     seq = list(words)
     return any(cmd[i:i + len(seq)] == seq for i in range(len(cmd)))
+
+
+def reminders(w) -> list[int]:
+    """Indexes of owner messages that remind the owner to remove the firewall allowance."""
+    return [i for i, e in enumerate(w.events) if e["kind"] == "owner.tell" and "Allowed apps" in e["text"]]
 
 
 # --- shared ---------------------------------------------------------------------------------
@@ -74,10 +53,8 @@ def _(world):
     assert world.clock.now() == 0
 
 
-@when("a test run starts")
 @when("the runner launches the receiver")
 @when("the runner attempts to launch the receiver")
-@when("a test run creates its firewall rule")
 def _(world):
     plan_run(world)
 
@@ -86,167 +63,6 @@ def _(world):
 def _(world):
     assert not world.events.of("proc.start", "proc.create.failed")
     assert world.launcher.argv is None
-
-
-@then("no firewall rule is created")
-@then("no new rule is created")
-def _(world):
-    assert not world.events.of("fw.create", "fw.create.failed")
-
-
-@then("cleanup runs")
-def _(world):
-    assert rec(world).cleanup_ran
-    listed = world.events.of("fw.list")
-    assert listed, "cleanup never looked at the firewall"
-    fw = s1("firewall")
-    assert not [r for r in listed[-1]["rules"] if fw.is_owned(fw.Rule(**r), world.build_root)]
-
-
-# --- 02 firewall ----------------------------------------------------------------------------
-
-@given(parsers.re("the build root recorded in the provenance is " + Q.format("root")))
-def _(world, root):
-    world.build_root = host_path(world, root)
-    world.work_root = world.build_root
-
-
-@given(parsers.re("the runner owns a rule only if it is named " + Q.format("name")
-                  + " and its program is a uxplay.exe under that root"))
-def _(world, name):
-    fw = s1("firewall")
-    assert fw.RULE_NAME == name
-    mine = _owned_rule(world, 0)
-    assert fw.is_owned(mine, world.build_root)
-    assert not fw.is_owned(dataclasses.replace(mine, name=name + "-other"), world.build_root)
-    assert not fw.is_owned(dataclasses.replace(mine, program="C:\\Tools\\uxplay.exe"), world.build_root)
-    assert not fw.is_owned(dataclasses.replace(mine, program=str(world.build_root / "build" / "other.exe")),
-                           world.build_root)
-
-
-@given(parsers.re("the firewall holds " + N.format("count") + " owned rules? left by (?:earlier runs|an earlier run)"))
-def _(world, count):
-    world.stale = [world.firewall.seed(_owned_rule(world, i)) for i in range(int(count))]
-
-
-@given(parsers.re("the firewall holds an unrelated rule named " + Q.format("name")))
-def _(world, name):
-    fw = s1("firewall")
-    world.unrelated = world.firewall.seed(fw.Rule(name=name, program="C:\\Program Files\\Steam\\steam.exe",
-                                                  direction="in", action="allow", profiles=("Public", "Private"),
-                                                  ports=None))
-    world.unrelated_fields = dataclasses.asdict(world.unrelated)
-
-
-@given("removing firewall rules fails")
-def _(world):
-    world.firewall.fail_remove = True
-
-
-@given("removing a rule reports success but leaves it in the next listing")
-def _(world):
-    world.firewall.remove_no_effect = True
-
-
-@given(parsers.re("the firewall holds a rule named " + Q.format("name") + " for the program " + Q.format("program")))
-def _(world, name, program):
-    fw = s1("firewall")
-    world.foreign = world.firewall.seed(fw.Rule(name=name, program=program, direction="in", action="allow",
-                                                profiles=("Public",), ports=None))
-    world.foreign_fields = dataclasses.asdict(world.foreign)
-
-
-@given(parsers.re("the active network profile is " + Q.format("profile")))
-def _(world, profile):
-    world.firewall.profile = profile
-
-
-@given("creating firewall rules fails")
-def _(world):
-    world.firewall.fail_create = True
-
-
-@given("a test run whose firewall rule was created")
-def _(world):
-    make_verified_build(world)
-
-
-@then("both owned rules are removed, and their removal checked, before the run's rule is created")
-def _(world):
-    created = world.events.first("fw.create")
-    assert created >= 0
-    for rule in world.stale:
-        checked = _removed_then_listed_absent(world, rule.id)
-        assert checked < created, f"{rule.id}: removal not verified before the run's rule was created"
-        assert rule.id not in world.firewall.rules
-
-
-@then(parsers.re("the rule named " + Q.format("name") + " is unchanged"))
-def _(world, name):
-    assert world.unrelated.name == name
-    current = world.firewall.rules.get(world.unrelated.id)
-    assert current is not None and dataclasses.asdict(current) == world.unrelated_fields
-    assert world.events.first("fw.remove", id=world.unrelated.id) == -1
-
-
-@then(parsers.re("the run stops naming the remaining rule " + Q.format("name")))
-def _(world, name):
-    assert not rec(world).started
-    assert any(name in e for e in world.record.errors)
-
-
-@then(parsers.re("the run stops naming the remaining rule " + Q.format("name") + " and its program"))
-def _(world, name):
-    assert not rec(world).started
-    text = " ".join(world.record.errors)
-    assert name in text and world.stale[0].program in text
-
-
-@then(parsers.re("the run stops naming that rule and its program " + Q.format("program")))
-def _(world, program):
-    assert not rec(world).started
-    text = " ".join(world.record.errors)
-    assert s1("firewall").RULE_NAME in text and program in text
-
-
-@then("that rule is unchanged")
-def _(world):
-    current = world.firewall.rules.get(world.foreign.id)
-    assert current is not None and dataclasses.asdict(current) == world.foreign_fields
-    assert world.events.first("fw.remove", id=world.foreign.id) == -1
-
-
-@then("the run creates exactly one rule")
-def _(world):
-    assert len(_created_events(world)) == 1
-
-
-@then(parsers.re("that rule is inbound and allows only the program " + Q.format("program")))
-def _(world, program):
-    asked = _created_events(world)[0]["asked"]
-    assert (asked["direction"], asked["action"]) == ("in", "allow")
-    assert asked["program"] == str(host_path(world, program))
-    recorded = rec(world).rule
-    assert recorded is not None and recorded.id == _created_events(world)[0]["id"]
-    for field in ("name", "program", "direction", "action", "ports"):
-        assert getattr(recorded, field) == asked[field], field
-    assert tuple(recorded.profiles) == asked["profiles"]
-
-
-@then(parsers.re("that rule applies to the " + Q.format("profile") + " profile"))
-def _(world, profile):
-    assert _created_events(world)[0]["asked"]["profiles"] == (profile,)
-
-
-@then("that rule names no port or port range")
-def _(world):
-    assert _created_events(world)[0]["asked"]["ports"] is None
-
-
-@then("the run reports that the firewall rule could not be created")
-def _(world):
-    assert world.events.of("fw.create.failed")
-    assert any("firewall rule" in e.lower() and "creat" in e.lower() for e in rec(world).errors)
 
 
 @when(parsers.re("the run ends by (?P<ending>the owner ending the test|the 10-minute timeout|UxPlay failing to start"
@@ -268,29 +84,17 @@ def _(world, ending):
     plan_run(world)
 
 
-@then("the run's rule is removed")
+@given("the UxPlay process ignores the stop request")
 def _(world):
-    assert world.executed
-    assert _run_rule_id(world) not in world.firewall.rules
+    world.launcher.ignores_stop = True
 
 
-@then("the removal is checked by listing the firewall rules again")
+@then("the run reports the UxPlay process that is still running, with its process ID")
 def _(world):
-    _removed_then_listed_absent(world, _run_rule_id(world))
-
-
-@then(parsers.re("the run reports the residual rule " + Q.format("name") + " and its program path"))
-def _(world, name):
-    r = rec(world)
-    created = _created_events(world)[0]
-    assert r.residual_rule is not None and r.residual_rule.id == created["id"] and r.residual_rule.name == name
-    text = " ".join(r.errors)
-    assert name in text and created["asked"]["program"] in text
-
-
-@then("the run does not report a clean cleanup")
-def _(world):
-    assert rec(world).cleanup_clean is False
+    proc = world.launcher.procs[0]
+    assert proc.alive
+    assert rec(world).residual_pid == proc.pid
+    assert any(str(proc.pid) in e for e in world.record.errors)
 
 
 # --- 03 runner ------------------------------------------------------------------------------
@@ -377,12 +181,6 @@ def _(world):
     world.launcher.create_fails = True
 
 
-@then("the run created its firewall rule before the capture failed")
-def _(world):
-    created, started = world.events.first("fw.create"), world.events.first("proc.start")
-    assert 0 <= created < started
-
-
 @then("the run reports the diagnostic capture failure")
 def _(world):
     assert rec(world).reason == "capture failed"
@@ -391,8 +189,7 @@ def _(world):
 
 @then("the run reports the process-creation error")
 def _(world):
-    created, failed = world.events.first("fw.create"), world.events.first("proc.create.failed")
-    assert 0 <= created < failed, "the rule must exist before process creation is attempted"
+    assert world.events.of("proc.create.failed")
     assert rec(world).reason == "failed to start"
     assert any("process" in e.lower() for e in world.record.errors)
 
@@ -403,19 +200,9 @@ def _(world):
     assert not [p for p in world.launcher.procs if p.alive]
     for p in world.launcher.procs:
         exited = world.events.first("proc.exit", pid=p.pid)
-        removed = world.events.first("fw.remove", id=_run_rule_id(world))
-        assert 0 <= exited < removed, "the process must have exited before cleanup"
-
-
-@then("the temporary firewall rule is removed")
-def _(world):
-    assert _run_rule_id(world) not in world.firewall.rules
-
-
-@then("its removal is verified")
-def _(world):
-    _removed_then_listed_absent(world, _run_rule_id(world))
-    assert rec(world).cleanup_clean is True
+        assert exited >= 0
+        for r in reminders(world):
+            assert exited < r, "the reminder came before the process had exited"
 
 
 @then("the run is not reported as successfully started")
@@ -475,11 +262,12 @@ def _(world, t, reason):
     assert rec(world).ended_at == int(t) and world.record.reason == reason
 
 
-@then("firewall cleanup starts only after UxPlay has stopped")
+@then("the firewall reminder comes only after UxPlay has stopped")
 def _(world):
     exited = world.events.first("proc.exit")
-    cleanup = world.events.first("fw.remove", id=_run_rule_id(world))
-    assert 0 <= exited < cleanup, "cleanup began before UxPlay had actually exited"
+    found = reminders(world)
+    assert found, "the owner was never reminded"
+    assert 0 <= exited < found[0], "the reminder came before UxPlay had actually exited"
 
 
 @then(parsers.re("the log's last line is the runner's end marker naming " + Q.format("reason")))
@@ -512,21 +300,3 @@ def _(world, deadline, end):
     assert r.deadline == int(deadline) and r.ended_at == int(end)
     saved = read_json(run_dir(world) / "run.json")
     assert (saved["deadline"], saved["ended_at"]) == (r.deadline, r.ended_at)
-
-
-@given("the UxPlay process ignores the stop request")
-def _(world):
-    world.launcher.ignores_stop = True
-
-
-@then("the run reports the UxPlay process that is still running, with its process ID")
-def _(world):
-    proc = world.launcher.procs[0]
-    assert proc.alive
-    assert rec(world).residual_pid == proc.pid
-    assert any(str(proc.pid) in e for e in world.record.errors)
-
-
-@then("cleanup still removes the firewall rule")
-def _(world):
-    _removed_then_listed_absent(world, _run_rule_id(world))

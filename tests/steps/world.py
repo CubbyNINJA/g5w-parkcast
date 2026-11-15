@@ -19,8 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from steps.fakes import (Events, FakeClock, FakeCompiler, FakeFirewall, FakeLauncher, FakeOwner,
-                         FakeUpstream, s1)
+from steps.fakes import Events, FakeClock, FakeCompiler, FakeLauncher, FakeOwner, FakeUpstream, s1
 
 PROJECT = Path(__file__).resolve().parents[2]
 REPO = PROJECT.parents[1]
@@ -65,12 +64,12 @@ def world(tmp_path, monkeypatch):
     clock = FakeClock(events)
     w = SimpleNamespace(
         tmp=tmp_path, events=events, clock=clock,
-        firewall=FakeFirewall(events), launcher=FakeLauncher(events, clock), owner=FakeOwner(),
+        launcher=FakeLauncher(events, clock), owner=FakeOwner(events),
         upstream=FakeUpstream(events), compiler=FakeCompiler(events),
         work_root=tmp_path / "uxplay-s1", runs_root=tmp_path / "runs", cwd=tmp_path / "cwd",
         build_root=tmp_path / "uxplay-s1", provenance=None, record=None, interrupted=False,
         log=None, report=None, judgement=None, notes={}, end=None, command=None, ios=None,
-        pending=None, executed=False, unrelated=None, run_error=None,
+        pending=None, executed=False, run_error=None,
     )
     w.cwd.mkdir()
     monkeypatch.chdir(w.cwd)
@@ -117,9 +116,10 @@ def execute_run(w) -> None:
     """Run the runner once with whatever the scenario's Given and When steps set up."""
     if w.provenance is None:
         make_verified_build(w)
+    w.owner.log_path = run_dir(w) / "uxplay.log"
     try:
-        w.record = s1("runner").run(w.provenance, run_dir(w), firewall=w.firewall, launcher=w.launcher,
-                                    clock=w.clock, owner=w.owner, timeout=600)
+        w.record = s1("runner").run(w.provenance, run_dir(w), launcher=w.launcher, clock=w.clock, owner=w.owner,
+                                    timeout=600)
     except KeyboardInterrupt:
         w.interrupted = True
 
