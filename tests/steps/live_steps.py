@@ -12,9 +12,11 @@ The evidence doesn't rest on what the runner wrote about itself:
 
 from __future__ import annotations
 
+import ctypes
 import json
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -128,19 +130,100 @@ class RecordingOwner:
         return self.inner.ask(question)
 
 
+class EnterExitObserver:
+    """Test-owned timing for OD-52, independent of the runner: one thread polls the Enter key's
+    state every 5 ms (GetAsyncKeyState, read-only) and, once UxPlay is launched, waits on its
+    process handle for the exit. Times are time.monotonic()."""
+
+    VK_RETURN, SYNCHRONIZE, WAIT_OBJECT_0 = 0x0D, 0x00100000, 0
+
+    def __init__(self):
+        self.presses: list[float] = []
+        self.exit_time: float | None = None
+        self.launcher = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self, launcher) -> None:
+        self.launcher = launcher
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(5)
+
+    def _run(self) -> None:
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+        down, handle = False, None
+        while not self._stop.is_set():
+            now = time.monotonic()
+            pressed = bool(user32.GetAsyncKeyState(self.VK_RETURN) & 0x8000)
+            if pressed and not down:
+                self.presses.append(now)
+            down = pressed
+            if handle is None and self.launcher.procs:
+                handle = kernel32.OpenProcess(self.SYNCHRONIZE, False, self.launcher.procs[0].pid)
+            if handle and self.exit_time is None and kernel32.WaitForSingleObject(handle, 0) == self.WAIT_OBJECT_0:
+                self.exit_time = time.monotonic()
+            time.sleep(0.005)
+        if handle:
+            kernel32.CloseHandle(handle)
+
+    def enter_after_launch(self) -> float | None:
+        """The first Enter press after UxPlay started: the one that ends the test."""
+        start = self.launcher.start_time
+        later = [t for t in self.presses if start is not None and t >= start]
+        return later[0] if later else None
+
+
 def _live(world, expect_reason: str) -> None:
     RUNS.mkdir(exist_ok=True)
     world.events = Events()
     world.real_launcher = RecordingLauncher(world.events)
     world.real_owner = RecordingOwner(world.events)
+    observer = getattr(world, "observer", None)
+    if observer is not None:
+        observer.start(world.real_launcher)
     before = {p.name for p in RUNS.iterdir() if p.is_dir()}
-    world.live_rc = s1("cli").main(["run"], deps=s1("cli").Deps.real(launcher=world.real_launcher,
-                                                                      owner=world.real_owner))
+    try:
+        world.live_rc = s1("cli").main(["run"], deps=s1("cli").Deps.real(launcher=world.real_launcher,
+                                                                          owner=world.real_owner))
+    finally:
+        if observer is not None:
+            observer.stop()
     new = [RUNS / n for n in {p.name for p in RUNS.iterdir() if p.is_dir()} - before]
     world.new_runs = new
     world.expect_reason = expect_reason
     if len(new) == 1:
         world.live_dir = LIVE["dir"] = new[0]
+        if observer is not None:
+            enter = observer.enter_after_launch()
+            (new[0] / "timing-observer.json").write_text(json.dumps({
+                "source": "test-owned observer (GetAsyncKeyState, process handle), time.monotonic()",
+                "launched_at": world.real_launcher.start_time, "enter_at": enter, "exit_at": observer.exit_time,
+                "enter_to_exit": (observer.exit_time - enter) if enter is not None and observer.exit_time else None,
+            }, indent=2), encoding="utf-8")
+
+
+@given("an independent observer timestamps Enter input and the launched process's exit")
+def _(world):
+    world.observer = EnterExitObserver()
+
+
+@then("the observed process exit is between 0 and 1 second after the observed Enter event")
+def _(world):
+    from steps.run_steps import within_enter_bound
+    enter, exit_ = world.observer.enter_after_launch(), world.observer.exit_time
+    assert enter is not None, "the observer saw no Enter press after UxPlay started"
+    assert exit_ is not None, "the observer never saw UxPlay exit"
+    assert within_enter_bound(enter, exit_), f"UxPlay exited {exit_ - enter:.3f} s after Enter"
+
+
+@then(parsers.re('the independent Enter and process-exit timestamps are retained under "runs/"'))
+def _(world):
+    saved = read_json(_latest(world) / "timing-observer.json")
+    assert saved["enter_at"] == world.observer.enter_after_launch()
+    assert saved["exit_at"] == world.observer.exit_time
 
 
 @when(parsers.re("the runner launches " + Q.format("name") + ", the owner starts Screen Mirroring to it and then ends the test at the console"))

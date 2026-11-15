@@ -350,6 +350,43 @@ def _(world):
     assert at_reminder and END_MARKER.match(at_reminder[-1]), "the end marker wasn't the log's last line at the reminder"
 
 
+ENTER_BOUND = 1.0  # OD-52: Enter to UxPlay's exit, inclusive
+
+
+def within_enter_bound(enter: float, exit_: float) -> bool:
+    """The OD-52 oracle, kept separate so its boundary can be checked on its own."""
+    return 0.0 <= exit_ - enter <= ENTER_BOUND + 1e-9
+
+
+@given(parsers.re(r"UxPlay takes (?P<seconds>\d+(?:\.\d+)?) seconds to exit once asked to stop"))
+def _(world, seconds):
+    world.launcher.stop_delay = float(seconds)
+
+
+@when(parsers.re(r"the owner presses Enter at second (?P<t>\d+(?:\.\d+)?)"))
+def _(world, t):
+    """The key press is a scheduled event the test records itself, at the literal time. The fake
+    owner reports it from then on, whenever the runner next asks."""
+    owner, at = world.owner, float(t)
+    owner.end_at = None
+
+    def press():
+        world.events.add("owner.enter")
+        owner.end_at = at
+
+    world.clock.at(at, press)
+
+
+@then("UxPlay has exited within 1 second of the key press")
+def _(world):
+    rec(world)
+    presses = world.events.of("owner.enter")
+    assert len(presses) == 1, presses
+    exits = [e for e in world.events.of("proc.exit") if e["pid"] == world.launcher.procs[0].pid]
+    assert exits, "UxPlay never exited; a reported leftover process doesn't meet the bound"
+    assert within_enter_bound(presses[0]["t"], exits[0]["t"]), (presses[0]["t"], exits[0]["t"])
+
+
 CUT_OFF = "POST /feedback RTS"  # how the first live log's UxPlay output ended (OD-50)
 
 

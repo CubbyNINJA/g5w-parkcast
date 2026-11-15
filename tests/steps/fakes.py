@@ -188,13 +188,15 @@ class FakeOwner:
         self.end_at: float | None = 1.0
         self.on_poll = None
         self.log_path: Path | None = None
+        self.log_finder = None  # for a run started by s1.py, whose folder name isn't known in advance
 
     def tell(self, message: str) -> None:
         self.messages.append(message)
         if self.events is not None:
             log = ""
-            if self.log_path is not None and self.log_path.is_file():
-                log = self.log_path.read_text(encoding="utf-8", errors="replace")
+            path = self.log_path or (self.log_finder() if self.log_finder else None)
+            if path is not None and path.is_file():
+                log = path.read_text(encoding="utf-8", errors="replace")
             self.events.add("owner.tell", text=message, log=log)
 
     def ended(self, now: float) -> bool:

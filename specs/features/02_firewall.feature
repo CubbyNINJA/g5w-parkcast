@@ -87,15 +87,31 @@ Feature: The firewall is the owner's, through Windows' own prompt
     And no run record exists
     And the run doesn't claim a record was made
 
-  @offline @failure @AIR-033 @AT-33
-  Scenario: Through the command, an unwritable run record still gets the reminder and no claim
+  @offline @failure @AIR-031 @AIR-033 @AT-31 @AT-33 @OD-53
+  Scenario Outline: An unsaved run record stops the command before analysis and evidence
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
-    And the run will end by the owner ending the test
+    And the run will end by <ending>
     And the run record can't be written once UxPlay is running
+    And every call to the analyser, evaluator and evidence writer is recorded
     When "s1.py run" runs
-    Then the owner is reminded to remove "uxplay.exe" at "C:\uxplay-s1\build\uxplay.exe" from "Windows Defender Firewall > Allowed apps"
+    Then it exits with code <code>
+    And stderr names the run-record failure
+    And the owner is reminded to remove "uxplay.exe" at "C:\uxplay-s1\build\uxplay.exe" from "Windows Defender Firewall > Allowed apps"
+    And the reminder says a declined or closed prompt may have left a block entry to remove too
+    And the reminder came after UxPlay had stopped and after the log's end marker
+    And the log's last line is still the runner's end marker
     And no run record exists
     And the console output doesn't claim a record was made
+    And the analyser, evaluator and evidence writer were never called
+    And no analyser report or verdict is written or announced
+    And the owner receives no evidence questions
+
+    Examples:
+      | ending                    | code |
+      | the owner ending the test | 1    |
+      | the 10-minute timeout     | 1    |
+      | UxPlay exiting mid-test   | 1    |
+      | a keyboard interrupt      | 130  |
 
   @offline @normal @AIR-033 @AT-33 @OD-37
   Scenario: The run record and the summary say the owner handled the firewall

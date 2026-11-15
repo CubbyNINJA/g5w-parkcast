@@ -91,6 +91,18 @@ Feature: What the run keeps, what it publishes, and what it claims
     And the owner's sound note and the iOS version with its build, marked "owner-entered", are recorded
     And the live run's folder, the build tree and the working directory hold no video, image or stream dump file
 
+  @pc @boundary @AIR-007 @AIR-012 @AIR-013 @AT-07 @AT-12 @AT-13 @OD-52
+  Scenario: A live Enter event stops UxPlay within one second
+    Given the verified build and this PC's network
+    And the owner's iPhone on iOS 27 on the same network
+    And an independent observer timestamps Enter input and the launched process's exit
+    When the runner launches "HU-Test", the owner starts Screen Mirroring to it and then ends the test at the console
+    Then the observed process exit is between 0 and 1 second after the observed Enter event
+    And the independent Enter and process-exit timestamps are retained under "runs/"
+    And no UxPlay process launched by the run is still running
+    And the owner's sound note and the iOS version with its build, marked "owner-entered", are recorded
+    And the live run's folder, the build tree and the working directory hold no video, image or stream dump file
+
   @pc @boundary @AIR-007 @AIR-011 @AIR-012 @AIR-013 @AT-07 @AT-11 @AT-12 @AT-13 @OD-08
   Scenario: A live run reaches the 10-minute timeout
     Given the verified build and this PC's network

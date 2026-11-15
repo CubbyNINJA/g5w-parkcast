@@ -120,6 +120,24 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     And the log's last line is the runner's end marker naming "owner ended"
     And the run records the deadline at second 600 and the end at second 120
 
+  @offline @boundary @AIR-007 @AT-07 @OD-52
+  Scenario Outline: Enter stops UxPlay within 1 second, wherever it falls between the runner's checks
+    Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
+    And a controlled clock
+    And UxPlay takes 0.4 seconds to exit once asked to stop
+    When the runner launches the receiver at second 0
+    And the owner presses Enter at second <enter>
+    Then UxPlay has exited within 1 second of the key press
+    And the firewall reminder comes only after UxPlay has stopped
+
+    Examples:
+      | enter  |
+      | 120.05 |
+      | 120.25 |
+      | 120.45 |
+      | 120.7  |
+      | 120.95 |
+
   @offline @failure @AIR-007 @AIR-028 @AIR-033 @AT-07 @AT-28 @AT-33 @OD-42
   Scenario: A UxPlay process that won't stop is reported before the marker
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"

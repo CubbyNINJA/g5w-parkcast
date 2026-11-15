@@ -112,7 +112,13 @@ def make_verified_build(w, exe: Path | None = None):
 
 
 def run_dir(w) -> Path:
-    return w.runs_root / "fixture-run"
+    """The run's folder: the runner's fixture-run, or else the one folder `s1.py run` created."""
+    fixed = w.runs_root / "fixture-run"
+    if not fixed.exists() and w.runs_root.is_dir():
+        made = [p for p in w.runs_root.iterdir() if p.is_dir()]
+        if len(made) == 1:
+            return made[0]
+    return fixed
 
 
 def execute_run(w) -> None:

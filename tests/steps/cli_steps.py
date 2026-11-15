@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,7 +12,7 @@ from pathlib import Path
 from pytest_bdd import given, parsers, then, when
 
 from steps.fakes import s1
-from steps.world import PROJECT, SESSION, make_verified_build, read_json, snapshot, wrap
+from steps.world import PROJECT, SESSION, make_verified_build, read_json, run_dir, snapshot, wrap
 
 Q = r'"(?P<{}>[^"]*)"'
 MUTATING = ("build.checkout", "build.compile", "proc.start", "proc.create.failed")
@@ -23,6 +24,7 @@ def _deps(w):
 
 
 def _cli(w, argv: list[str]) -> None:
+    w.owner.log_finder = lambda: run_dir(w) / "uxplay.log"
     w.before = snapshot(w.tmp)
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -150,6 +152,46 @@ def _(world):
 @then("no file in the project, apart from its .venv and Python caches, is created or changed")
 def _(world):
     assert world.after == world.before
+
+
+@given("every call to the analyser, evaluator and evidence writer is recorded")
+def _(world, monkeypatch):
+    """Spies at the call sites `s1.py run` uses. Each records its call before delegating, so a
+    later exception can't hide that it was invoked (ASTRA_REVIEW_s1_rev4_scenarios)."""
+    world.downstream = []
+    for module, name in (("analyser", "analyse"), ("evaluator", "judge"), ("evidence", "write")):
+        target = s1(module)
+        real = getattr(target, name)
+
+        def spy(*args, _real=real, _label=f"{module}.{name}", **kwargs):
+            world.downstream.append(_label)
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(target, name, spy)
+
+
+@then("stderr names the run-record failure")
+def _(world):
+    assert re.search(r"run record", world.err, re.I), world.err
+    assert re.search(r"\b(save|saved|write|written|writing)\b", world.err, re.I), world.err
+
+
+@then("the analyser, evaluator and evidence writer were never called")
+def _(world):
+    assert world.downstream == [], world.downstream
+
+
+@then("no analyser report or verdict is written or announced")
+def _(world):
+    written = [p for p in world.runs_root.rglob("*") if p.name in ("report.json", "verdict.json")]
+    assert not written, written
+    said = world.out + world.err + "\n".join(world.owner.messages)
+    assert not re.search(r"\bverdict\b|\bGO\b|NO-GO|INCONCLUSIVE|\breport\b", said), said
+
+
+@then("the owner receives no evidence questions")
+def _(world):
+    assert world.owner.asked == [], world.owner.asked
 
 
 @given("a fixture run whose evidence makes its verdict NO-GO")
