@@ -87,10 +87,13 @@ def pytest_bdd_before_step(request, feature, scenario, step, step_func):
 
 
 def host_path(w, written: str) -> Path:
-    """Map a scenario path under C:\\uxplay-s1\\ into the scenario's temporary directory."""
-    if written.lower().startswith(FIXTURE_ROOT.lower()):
-        rest = PureWindowsPath(written[len(FIXTURE_ROOT):]).parts
-        return w.tmp.joinpath("uxplay-s1", *rest)
+    """Map a scenario path under C:\\uxplay-s1\\ into the scenario's temporary directory.
+
+    Compared by path parts, not text: a Scenario Outline table cell can arrive with doubled
+    backslashes, which Windows still resolves to the real C:\\uxplay-s1 build."""
+    parts = PureWindowsPath(written).parts
+    if [p.lower() for p in parts[:2]] == [p.lower() for p in PureWindowsPath(FIXTURE_ROOT).parts]:
+        return w.tmp.joinpath("uxplay-s1", *parts[2:])
     return Path(written)
 
 
