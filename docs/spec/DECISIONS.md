@@ -22,3 +22,10 @@ Scenarios cite these IDs where a decision is what they assert.
 | OD-14 | 2026-11-14 | Pin the upstream UxPlay `master` commit at build time, recorded in the build provenance. The S1 receiver name is "HU-Test". (Was AMB-17.) | Owner: "Accept all 7" |
 | OD-15 | 2026-11-14 | The owner's iPhone runs iOS 27 (beta or release; the exact build is recorded at the test). This answers AMB-03 for S1 only: other iOS versions stay open. | Owner: "iOS 27 (beta or release)" |
 | OD-16 | 2026-11-14 | Investigate sending the video signal to the HUD as part of this project. | Owner: "also include investigating sending video signal to the HUD" |
+| OD-17 | 2026-11-14 | If one session is complete and GO but the log as a whole is incomplete or partly unreadable, the run is INCONCLUSIVE with the reason "evidence error". Never claim GO on damaged evidence. (Was AMB-19.) | Owner: "Accept all 5" |
+| OD-18 | 2026-11-14 | When the sessions are NO-GO and INCONCLUSIVE with none GO, the run is NO-GO. (Was AMB-20.) | Owner: "Accept all 5" |
+| OD-19 | 2026-11-14 | A session that requests HEVC and then starts H.264 mirroring is GO, with the earlier HEVC request noted in its reason. (Was AMB-21.) | Owner: "Accept all 5" |
+| OD-20 | 2026-11-14 | If upstream `master` is no longer UxPlay 1.74 at build time, stop before building and ask the owner. (Was AMB-22.) | Owner: "Accept all 5" |
+| OD-21 | 2026-11-14 | The owner enters the full iOS version with its build number (Settings > General > About), marked owner-entered. (Was AMB-23.) | Owner: "Accept all 5" |
+| OD-22 | 2026-11-14 | No video on the HUD; it isn't possible anyway (`docs/evidence/HUD_VIDEO_FINDINGS.md`). Any later HUD feature is text only, through channels the stock software already uses, and never touches the driver-assistance display toggles. (Was AMB-18.) | Owner: "Accept" |
+| OD-23 | 2026-11-14 | Video is parked-only. Mirrored audio is allowed outside Park. (Answers AMB-01 differently from its proposal, which also stopped audio.) | Owner: "Video parked-only, audio allowed" |
