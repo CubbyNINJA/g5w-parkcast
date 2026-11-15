@@ -82,6 +82,7 @@ def summary(run_dir, tier: str) -> str:
         f"iOS: {ios}",
         f"UxPlay build commit: {run.get('commit') or 'not recorded'}",
         "Head unit: untested. This result says nothing about decoding, networking or playback on the head unit.",
+        "Firewall: the allowance for uxplay.exe was handled by the owner through Windows' prompt.",
     ]
     if tier == "offline":
         lines.append("This is a synthetic fixture result. It is not evidence about any iPhone.")
