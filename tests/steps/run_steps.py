@@ -292,7 +292,9 @@ def _(world, reason):
     last = text.splitlines()[-1]
     logfile = s1("logfile")
     assert logfile.is_end_marker(last) and reason in last
-    exit_event = world.events.of("proc.exit")[0]
+    # A UxPlay that ignored the stop request never exits (OD-42), so there's no exit to order against.
+    exits = world.events.of("proc.exit")
+    exit_event = exits[0] if exits else {"log_at_exit": ""}
     assert not any(logfile.is_end_marker(l) for l in exit_event["log_at_exit"].splitlines()), \
         "the end marker was written before UxPlay had exited"
 
