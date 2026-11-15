@@ -7,6 +7,8 @@ run record agrees with it. The runner takes no firewall backend (OD-31).
 
 from __future__ import annotations
 
+import re
+
 from pytest_bdd import given, parsers, then, when
 
 from steps.fakes import FakeLauncher, s1
@@ -285,18 +287,67 @@ def _(world):
     assert 0 <= exited < found[0], "the reminder came before UxPlay had actually exited"
 
 
+# The end marker's grammar, written out here so the steps don't take it from the code under test
+# (ASTRA_REVIEW_s1_od50 finding 3): reason, time, and the process ID still running if any (OD-42).
+END_MARKER = re.compile(r"^# airplay-s1 runner end reason=(?P<reason>.+?) t=-?\d+\.\d{3}"
+                        r"(?: still-running-pid=(?P<pid>\d+))?$")
+
+
+def _ignored_stop_reported(world) -> bool:
+    """The OD-42 case: the fake ignored the stop, is still alive, and the run reported its PID."""
+    procs = world.launcher.procs
+    if not (world.launcher.ignores_stop and procs and procs[0].alive):
+        return False
+    pid = procs[0].pid
+    return rec(world).residual_pid == pid and any(str(pid) in m for m in world.owner.messages)
+
+
 @then(parsers.re("the log's last line is the runner's end marker naming " + Q.format("reason")))
 def _(world, reason):
     text = (run_dir(world) / "uxplay.log").read_text(encoding="utf-8")
     assert text.endswith("\n")
     last = text.splitlines()[-1]
-    logfile = s1("logfile")
-    assert logfile.is_end_marker(last) and reason in last
-    # A UxPlay that ignored the stop request never exits (OD-42), so there's no exit to order against.
+    match = END_MARKER.match(last)
+    assert match and match["reason"] == reason, last
     exits = world.events.of("proc.exit")
-    exit_event = exits[0] if exits else {"log_at_exit": ""}
-    assert not any(logfile.is_end_marker(l) for l in exit_event["log_at_exit"].splitlines()), \
+    if not exits:
+        # Only a UxPlay that ignored the stop request may never exit (OD-42); every other ending needs an exit.
+        assert _ignored_stop_reported(world), "UxPlay never exited, and this isn't the reported OD-42 case"
+        return
+    assert not any(END_MARKER.match(l) for l in exits[0]["log_at_exit"].splitlines()), \
         "the end marker was written before UxPlay had exited"
+
+
+@then("UxPlay exited before the end marker was written")
+def _(world):
+    exits = world.events.of("proc.exit")
+    assert exits, "UxPlay never exited"
+    assert not any(END_MARKER.match(l) for l in exits[0]["log_at_exit"].splitlines())
+    assert END_MARKER.match((run_dir(world) / "uxplay.log").read_text(encoding="utf-8").splitlines()[-1])
+
+
+def _residual_report(world) -> int:
+    pid = str(world.launcher.procs[0].pid)
+    found = [i for i, e in enumerate(world.events)
+             if e["kind"] == "owner.tell" and pid in e["text"] and "Allowed apps" not in e["text"]]
+    assert found, "the run never told the owner which process it couldn't stop"
+    return found[0]
+
+
+@then("the residual-process report precedes the end marker")
+def _(world):
+    report = world.events[_residual_report(world)]
+    assert not any(END_MARKER.match(l) for l in report["log"].splitlines()), \
+        "the end marker was already in the log when the leftover process was reported"
+
+
+@then("the firewall reminder follows the residual-process report and the end marker")
+def _(world):
+    found = reminders(world)
+    assert len(found) == 1, f"expected one reminder, got {len(found)}"
+    assert _residual_report(world) < found[0], "the reminder came before the leftover process was reported"
+    at_reminder = world.events[found[0]]["log"].splitlines()
+    assert at_reminder and END_MARKER.match(at_reminder[-1]), "the end marker wasn't the log's last line at the reminder"
 
 
 CUT_OFF = "POST /feedback RTS"  # how the first live log's UxPlay output ended (OD-50)

@@ -121,7 +121,7 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     And the run records the deadline at second 600 and the end at second 120
 
   @offline @failure @AIR-007 @AIR-028 @AIR-033 @AT-07 @AT-28 @AT-33 @OD-42
-  Scenario: A UxPlay process that won't stop is reported
+  Scenario: A UxPlay process that won't stop is reported before the marker
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And the UxPlay process ignores the stop request
     When the runner launches the receiver
@@ -129,12 +129,20 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     Then the run reports the UxPlay process that is still running, with its process ID
     And the log's last line is the runner's end marker naming "owner ended"
     And the end marker names the process ID still running
+    And the residual-process report precedes the end marker
+    And the firewall reminder follows the residual-process report and the end marker
     And the owner is reminded to remove "uxplay.exe" at "C:\uxplay-s1\build\uxplay.exe" from "Windows Defender Firewall > Allowed apps"
 
   @offline @failure @AIR-028 @AT-28 @OD-50
-  Scenario: UxPlay output cut off mid-line still leaves the end marker on its own line
+  Scenario Outline: Cut-off output remains separate from the end marker
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And UxPlay's output stops partway through a line, with no final newline
-    When the run ends by the owner ending the test
-    Then the log's last line is the runner's end marker naming "owner ended"
+    When the run ends by <ending>
+    Then the log's last line is the runner's end marker naming "<reason>"
     And the cut-off output stays on its own line just before the end marker
+    And UxPlay exited before the end marker was written
+
+    Examples:
+      | ending                    | reason      |
+      | the owner ending the test | owner ended |
+      | a keyboard interrupt      | interrupted |
