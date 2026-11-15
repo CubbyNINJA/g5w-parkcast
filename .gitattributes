@@ -1,0 +1,2 @@
+# Files that run on the head unit must be LF (AGENTS.md section 9): mksh keeps a CR as part of the line.
+tools/unit-probes/** text eol=lf
