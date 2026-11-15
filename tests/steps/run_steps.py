@@ -299,6 +299,21 @@ def _(world, reason):
         "the end marker was written before UxPlay had exited"
 
 
+CUT_OFF = "POST /feedback RTS"  # how the first live log's UxPlay output ended (OD-50)
+
+
+@given("UxPlay's output stops partway through a line, with no final newline")
+def _(world):
+    world.launcher.cut_off = (20, CUT_OFF)
+
+
+@then("the cut-off output stays on its own line just before the end marker")
+def _(world):
+    lines = (run_dir(world) / "uxplay.log").read_text(encoding="utf-8").splitlines()
+    assert CUT_OFF in world.launcher.emitted, "the fake never wrote the cut-off output"
+    assert lines[-2] == CUT_OFF, lines[-3:]
+
+
 @then(parsers.re("the run records the launch (?:time|at second " + N.format("launch") + "), the deadline at second "
                  + N.format("deadline") + " and the end at second " + N.format("end")))
 def _(world, deadline, end, launch=None):

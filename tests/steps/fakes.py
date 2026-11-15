@@ -124,6 +124,8 @@ class FakeLauncher:
         self.events = events
         self.clock = clock
         self.lines: list[tuple[float, str]] = [(0.5, self.BANNER), (0.6, self.DIAGNOSTIC)]
+        # (second, text) written with no newline: real UxPlay's buffered output cut off when it stops (OD-50).
+        self.cut_off: tuple[float, str] | None = None
         self.exit_at_once: int | None = None
         self.exit_at: float | None = None
         self.ignores_stop = False
@@ -152,18 +154,21 @@ class FakeLauncher:
             proc.exit(self.exit_at_once)
             return proc
 
-        def write(text):
+        def write(text, end="\n"):
             if not proc.alive:
                 return
             if log.closed:
                 self.events.add("log.write.after.close", text=text)
                 return
-            log.write((text + "\n").encode("utf-8"))
+            log.write((text + end).encode("utf-8"))
             log.flush()
             self.emitted.append(text)
 
         for t, text in self.lines:
             self.clock.at(t, lambda text=text: write(text))
+        if self.cut_off is not None:
+            t, text = self.cut_off
+            self.clock.at(t, lambda: write(text, end=""))
         if self.exit_at is not None:
             self.clock.at(self.exit_at, lambda: proc.exit(1))
         return proc

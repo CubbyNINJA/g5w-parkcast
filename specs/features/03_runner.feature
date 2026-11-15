@@ -130,3 +130,11 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     And the log's last line is the runner's end marker naming "owner ended"
     And the end marker names the process ID still running
     And the owner is reminded to remove "uxplay.exe" at "C:\uxplay-s1\build\uxplay.exe" from "Windows Defender Firewall > Allowed apps"
+
+  @offline @failure @AIR-028 @AT-28 @OD-50
+  Scenario: UxPlay output cut off mid-line still leaves the end marker on its own line
+    Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
+    And UxPlay's output stops partway through a line, with no final newline
+    When the run ends by the owner ending the test
+    Then the log's last line is the runner's end marker naming "owner ended"
+    And the cut-off output stays on its own line just before the end marker

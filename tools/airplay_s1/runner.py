@@ -99,6 +99,15 @@ def _write_record(record: RunRecord, run_dir: Path) -> None:
             pass
 
 
+def _ends_with_newline(path: Path) -> bool:
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        if f.tell() == 0:
+            return True
+        f.seek(-1, os.SEEK_END)
+        return f.read(1) == b"\n"
+
+
 def _preflight(provenance, run_dir: Path) -> str | None:
     """Why the run can't launch, or None (OD-29, OD-39)."""
     exe = Path(provenance.executable)
@@ -185,7 +194,11 @@ def run(provenance, run_dir, launcher, clock, owner, timeout: float = TIMEOUT) -
                 owner.tell(f"UxPlay didn't stop: process {proc.pid} is still running. End it in Task Manager.")
             record.exit_code = proc.poll()
 
-        # 7. Only then the end marker, then the record.
+        # 7. Only then the end marker, then the record. A stopped UxPlay can leave its buffered
+        #    output cut off mid-line, so the marker starts a new line if the log doesn't (OD-50).
+        log.flush()
+        if not _ends_with_newline(run_dir / LOG):
+            log.write(b"\n")
         log.write((logfile.end_marker(record.reason, record.ended_at, pid=record.residual_pid) + "\n").encode("utf-8"))
         log.flush()
     _write_record(record, run_dir)
