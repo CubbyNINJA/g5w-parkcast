@@ -7,3 +7,10 @@ __pycache__/
 build/
 # @pc run output: UxPlay logs can name the owner's iPhone and its addresses
 runs/
+
+# OEM binaries and probe output copied from the head unit (never commit)
+*.odex
+*.apk
+*.db
+*.db-journal
+NEMESIS-diag/

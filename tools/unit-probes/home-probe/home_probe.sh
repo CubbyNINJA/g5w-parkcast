@@ -48,7 +48,8 @@ mkdir -p "$P/db"
 for f in "$DB_DIR"/*; do
     [ -f "$f" ] && cp "$f" "$P/db/" 2>> "$L"
 done
-note "copied $(ls "$P/db" | wc -l) database file(s)"
+n=0; for f in "$P/db"/*; do [ -f "$f" ] && n=$((n + 1)); done
+note "copied $n database file(s)"
 toast "Home probe done"
 note "home probe end"
 sync
