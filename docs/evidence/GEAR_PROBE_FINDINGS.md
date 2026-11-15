@@ -60,6 +60,21 @@ on the car.
 So the receiver can subscribe to `onGearPStatus` for changes and call `getGearPStatus` for the
 starting state, and to re-confirm Park while nothing changes.
 
+## park-probe results (2026-11-15 15:08, 260206 CA)
+
+A second read-only probe (`tools/unit-probes/park-probe`) called only `getGearPStatus`
+(transaction 36 on `com.hkmc.micom.system`) once a second for 45 s, guards passed, while the owner
+shifted P, R and back to P. Output in `NEMESIS-diag/park-probe/` on the stick.
+
+| Evidence | What it shows |
+|---|---|
+| `readings.txt` | `Parcel(00000000 00000001)`, so 1, in Park; `00000000`, so 0, out of Park. Each phase's readings flip once, when the owner actually shifted. |
+| `logcat-gear.txt` | `onGearPStatus` 0 at 15:08:43.25 and 1 at 15:08:56.80. The getter's flips match these to within its one-second polling. |
+| `classpath.txt` | `/system/framework/automotive.jar` is on `BOOTCLASSPATH`, and `pm list libraries` lists `automotive`. Any app can load `VehicleInfoManager` and `VehicleInfoListener` by name. |
+
+The getter is a working Park reading, consistent with the notifications, and the public wrapper
+classes are available to an ordinary app.
+
 ## Build identity (AMB-32)
 
 From `build-props.txt`:
@@ -85,8 +100,6 @@ locking when it's shifted out of Park; nothing the probe calls touches the locks
 ## Not verified
 
 - Which of `VCU_GearPosSta` 5 and 6 is N and which is D.
-- Whether an ordinary app can load `VehicleInfoManager`: that depends on `automotive.jar` being on
-  the boot class path or needing `<uses-library>`. Raw binder calls work either way.
-- Whether SELinux or the service manager restrict an app's binder calls (Android 4.4).
-- What `getGearPStatus` returns on the live unit, in and out of Park.
+- Whether SELinux or the service manager restrict binder calls from an ordinary app (the probes
+  ran as root). Only the receiver itself, running as an app, can show that.
 - Any build other than 260206.
