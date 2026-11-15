@@ -1,0 +1,27 @@
+# Ambiguity, contradiction and blocker register
+
+Nothing here is decided. A "proposal" describes a suggestion only: it isn't adopted until the
+owner accepts it, and then it moves to `DECISIONS.md`. Scenarios that assert a proposal carry
+its `@AMB-nn` tag.
+
+Types: **A** consequential ambiguity · **B** blocker · **M** missing acceptance criterion.
+
+| ID | Type | Question | Evidence | Proposal | Status |
+|---|---|---|---|---|---|
+| AMB-01 | A | Must video and audio be impossible outside Park? | OD-01 says "when parked". The stock unit locks out video while driving (`com.hkmc.regulation`; DiPO listens for `android.mobis.regulation.ACTION_EXIT_REGULATION`). | Play only in Park. Any error, missing service or unknown firmware stops both video and audio. Shifting out of Park stops playback at once. | OPEN |
+| AMB-02 | B | Will iOS mirror with H.264 to a receiver that doesn't offer HEVC? This is the feasibility gate. | The unit has no hardware HEVC (`OMX.TCC.hevcdec` never registered, gen5-codec-patch README). UxPlay issue #535: one iOS 27 beta failed until `-h265` was enabled. | The receiver advertises H.264 only. If the owner's iPhone won't mirror without HEVC, stop the project at slice S1. | OPEN (slice S1 tests it) |
+| AMB-03 | A | Which iOS versions must work? | The owner hasn't said which iOS version the iPhone runs. | Whatever the owner's iPhone runs at the time of the S1 test, recorded with the evidence. | OPEN |
+| AMB-04 | A | What display size does the receiver advertise? | The head unit's screen is 1920×720. UxPlay takes `-s WxH@fps`. | Advertise 1920×720 at 60 fps. Accept letterboxing of a portrait phone. | OPEN |
+| AMB-05 | A | Which content is in scope? | YouTube supports AirPlay. Netflix doesn't support AirPlay and blocks mirroring. UxPlay's `-hls` mode makes the receiver fetch the video itself, and the head unit has no internet. | In scope: mirroring whatever the phone shows, including YouTube. Out of scope: Netflix and other DRM apps, and HLS URL mode. | OPEN |
+| AMB-06 | A | How does audio reach the car's speakers, and in what format? | AirPlay mirroring audio is AAC-ELD. engine.sound plays through the cabin speakers with `AudioTrack` plus `MicomAudioManager`. `libstagefright_soft_aacdec.so` is on the unit. | Decode with the stock AAC decoder through `MediaCodec`, and play with `AudioTrack` the way engine.sound does. Measure the format in slice S1. | OPEN |
+| AMB-07 | A | How does the iPhone get onto the head unit's network outside CarPlay, and can it mirror while CarPlay is connected? | During wireless CarPlay the phone is on the head unit's hotspot. The hotspot password is a secret. Whether iOS offers Screen Mirroring on that network is unknown. | Test both in a later slice. Never copy the password off the unit without the owner's explicit approval. | OPEN |
+| AMB-08 | A | How is the app launched? | The All Apps grid is hardcoded. NEMESIS Manager can launch a `kind=apk` component. | Launch from NEMESIS Manager. | OPEN |
+| AMB-09 | A | Is the package for the owner's own use only? | AirPlay mirroring is a reverse-engineered protocol (FairPlay), so distribution needs legal advice. | Personal use on the owner's own unit only. No release or catalog entry. | OPEN |
+| AMB-10 | A | Does the receiver depend on the `media.codecs` package? | The receiver opens `OMX.TCC.avcdec` by name, which doesn't need the codec patch. | No dependency. | OPEN |
+| AMB-11 | A | S1 runner timeout: how long does it wait, and when does the timer start? | Astra S1 draft, open question 1 (AIR-007, AIR-011). | 10 minutes from receiver launch. The owner can end the test earlier. | OPEN |
+| AMB-12 | A | Must S1 test YouTube, or is ordinary Screen Mirroring enough? | Astra S1 draft, open question 2 (AMB-05). | Ordinary Screen Mirroring decides GO or NO-GO. A YouTube check is recorded as an extra observation only. | OPEN |
+| AMB-13 | A | Must S1 judge audio playback, beyond recording the logged audio format? | Astra S1 draft, open question 3 (AMB-06). | Record the format only. The owner says whether sound played, as a note. | OPEN |
+| AMB-14 | A | If UxPlay's log doesn't show the iOS version, may the owner type it in for the private run record? | Astra S1 draft, open question 4 (AMB-03, AIR-012). | Yes. The runner asks for it, and the record marks it "owner-entered". | OPEN |
+| AMB-15 | A | Which verdict applies when one run holds several sessions with different outcomes? | Astra S1 draft, open question 5 (AIR-010). | A verdict per session. The run is GO if any complete session is GO, and each session's verdict is listed. | OPEN |
+| AMB-16 | A | Which verdict applies when the log is unreadable, incomplete, or doesn't identify the codec? | Astra S1 draft, open question 6 (AIR-009, AIR-010). | INCONCLUSIVE, with the reason "evidence error" and the limitation named. Never GO. | OPEN |
+| AMB-17 | A | Which UxPlay commit is pinned, and what fixed receiver name does S1 use? | Astra S1 draft, open question 7 (AIR-002, AIR-006). | The upstream `master` commit at build time, recorded and then pinned. The name "HU-Test". | OPEN |

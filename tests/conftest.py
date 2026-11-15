@@ -1,0 +1,36 @@
+"""Tier selection (specs/README.md): @offline runs by default; @pc needs --run-pc; @unit never runs here.
+
+Run from this project's own .venv (AGENTS.md). If collected from hmg_nemesis's root by a bare `pytest`,
+where pytest-bdd isn't installed, these tests skip instead of breaking the main suite.
+"""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_HERE = Path(__file__).resolve().parent
+for _p in (_HERE, _HERE.parent / "tools"):  # also works without this project's pytest.ini
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
+
+try:
+    import pytest_bdd  # noqa: F401
+except ImportError:  # outside this project's .venv
+    collect_ignore_glob = ["*.py"]
+else:
+    from steps import *  # noqa: F401,F403  pytest-bdd finds step definitions through conftest's namespace
+
+
+def pytest_addoption(parser):
+    parser.addoption("--run-pc", action="store_true", default=False,
+                     help="also run @pc scenarios (this PC's UxPlay build and the owner's iPhone)")
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        tags = {m.name for m in item.iter_markers()}
+        if "unit" in tags:
+            item.add_marker(pytest.mark.skip(reason="@unit runs on the head unit; its evidence is the stick logs"))
+        elif "pc" in tags and not config.getoption("--run-pc"):
+            item.add_marker(pytest.mark.skip(reason="@pc needs --run-pc (this PC and the owner's iPhone)"))

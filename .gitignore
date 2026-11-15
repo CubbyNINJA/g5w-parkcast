@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+# Astra staging and raw Codex output (the saved review/requirements files are tracked)
+.astra/
+# UxPlay build trees and PC-test scratch
+build/
+# @pc run output: UxPlay logs can name the owner's iPhone and its addresses
+runs/

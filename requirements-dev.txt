@@ -1,0 +1,3 @@
+# Test dependencies for this project only (its own .venv). hmg_nemesis's main suite doesn't use these.
+pytest==8.3.5
+pytest-bdd==8.1.0
