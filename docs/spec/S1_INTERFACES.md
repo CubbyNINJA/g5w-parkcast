@@ -144,11 +144,6 @@ There is no firewall module. The S1 tools never create, change or remove a firew
 - `screen_content(dirs)` lists video, image and stream-dump files. `latest_run(runs_root)`
   returns the newest run folder.
 
-## `boundary`
-
-- `check(repo_root) -> list[str]`: a `.feature` file or a `pytest_bdd` import outside
-  `Sources/airplay-receiver/`, each listed by its repository-relative path.
-
 ## `cli`
 
 - `main(argv, deps=None) -> int`, and

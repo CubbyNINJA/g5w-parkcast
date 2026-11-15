@@ -1,2 +1,8 @@
-# Files that run on the head unit must be LF (AGENTS.md section 9): mksh keeps a CR as part of the line.
-tools/unit-probes/** text eol=lf
+# Everything is LF in the repository and in working copies, on every OS. Files that run on the
+# head unit must be LF (AGENTS.md), and the spec tools merge rows by exact text.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.zip binary
+*.apk binary
+*.jar binary

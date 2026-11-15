@@ -12,7 +12,7 @@ from pytest_bdd.parser import FeatureParser
 
 FEATURES = Path(__file__).resolve().parents[1] / "specs" / "features"
 STEP_MODULES = ["steps.build_steps", "steps.run_steps", "steps.prompt_steps", "steps.log_steps", "steps.evidence_steps",
-                "steps.boundary_steps", "steps.cli_steps", "steps.live_steps"]
+                "steps.cli_steps", "steps.live_steps"]
 
 
 def _definitions():

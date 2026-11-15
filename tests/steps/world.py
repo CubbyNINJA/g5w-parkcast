@@ -22,7 +22,7 @@ import pytest
 from steps.fakes import Events, FakeClock, FakeCompiler, FakeLauncher, FakeOwner, FakeUpstream, s1
 
 PROJECT = Path(__file__).resolve().parents[2]
-REPO = PROJECT.parents[1]
+REPO = PROJECT  # the repository root (OD-89)
 BANNER = FakeLauncher.BANNER
 WRAP_OFFSET = 2
 FIXTURE_ROOT = "C:\\uxplay-s1\\"

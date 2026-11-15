@@ -1,14 +1,14 @@
-# AGENTS.md: AirPlay receiver for the head unit
+# AGENTS.md: g5w-parkcast
 
-This project builds an AirPlay screen-mirroring receiver for the Gen5W head unit, shipped as a
-NEMESIS package from `package/`. It lives inside hmg_nemesis but has its own process, set out
-below. The repository's `AGENTS.md` §10 points here (OD-03).
+This project builds an AirPlay screen-mirroring receiver for Hyundai, Kia and Genesis Gen5W head
+units, shipped as a NEMESIS package from `package/`, so phone apps can be watched on the car's
+screen while parked. It is a standalone repository (OD-89); it started inside hmg_nemesis and its
+history came with it. Read `CONTRIBUTING.md` for how to contribute, and this file for the rules.
 
 ## Development process: SDD and BDD only
 
 All work is spec-driven and behaviour-driven. Don't write production code or step definitions
-for behaviour that has no reviewed scenario. The loop follows SilphCo Lambda 2.0's
-(`D:\Documents\SilphCo Lambda 2.0\AGENTS.md`), as the owner asked (OD-02):
+for behaviour that has no reviewed scenario. The loop is the owner's spec-first process (OD-02):
 
 1. **Owner decisions.** Record every owner decision for the slice in `docs/spec/DECISIONS.md`
    (`OD-nn`). Anything still open goes to `docs/spec/AMBIGUITY_REGISTER.md` (`AMB-nn`) and is
@@ -56,18 +56,29 @@ Neither tier needs an elevated terminal. The S1 tools never change the firewall:
 to allow `uxplay.exe` the first time it listens, and each run reminds you how to remove that
 allowance afterwards (OD-31, OD-36).
 
-The project's tests use pytest-bdd in their own `.venv`. hmg_nemesis's main suite
-(`Sources/tests/unit`) stays stdlib plus pytest and never imports anything from here.
+The tests use pytest-bdd in the project's own `.venv` (`requirements-dev.txt`). The S2 parking
+gate is plain Java, compiled by the tests with `javac` from a JDK 17 (OD-66).
 
-## Git
+## Git (OD-90)
 
-The work is on branch `chore/airplay-receiver` in `nemesis-rebase`, with no upstream. Commit at
-milestones. **Never push it anywhere** unless the owner says so (OD-03).
+- **Commit often**, one coherent change per commit, with the suite in a known state.
+- **Push at milestones**: a slice's requirements folded in, its scenarios reviewed, its suite green.
+- **Merge at the end of a slice**: `main` holds finished slices; each slice works on its own
+  branch (for example `s2-parking-gate`) and is merged into `main` when it's done.
+- The repository is public. Never commit OEM binaries, UxPlay builds, `runs/`, `.astra/`, or
+  anything identifying: emails, IP or MAC addresses, VINs, iPhone names, Wi-Fi details.
+  Commits use the owner's GitHub noreply address.
+
+## Documentation (OD-90)
+
+Keep the docs current with every change, so other people and agents can contribute: `README.md`,
+`CONTRIBUTING.md`, this file, `docs/spec/` and `docs/evidence/`. A change that alters behaviour,
+process or layout updates the doc that describes it in the same commit.
 
 ## Target facts (from the owner's unit, 260206 CA, NEMESIS 1.16.7)
 
 - Package metadata limits: `short-desc` at most 64 characters, `detailed-desc` at most 256.
-  Declare `os` and `models`. Build with this tree's builder, which enforces the limits.
+  Declare `os` and `models`. Build with the NEMESIS 1.16 package builder, which enforces the limits.
 - Toolbox `mv` takes no options, so use plain `mv`. Test hooks with a fake `mv` that rejects
   options.
 - Hardware H.264 decoding uses `OMX.TCC.avcdec`, opened by name. There's no hardware HEVC:

@@ -1,8 +1,7 @@
 """Tier selection (specs/README.md): @offline runs by default; @host needs --run-host; @pc needs --run-pc;
 @unit never runs here.
 
-Run from this project's own .venv (AGENTS.md). If collected from hmg_nemesis's root by a bare `pytest`,
-where pytest-bdd isn't installed, these tests skip instead of breaking the main suite.
+Run from this project's own .venv (AGENTS.md). Without pytest-bdd installed, these tests skip.
 """
 
 import sys
@@ -22,7 +21,7 @@ except ImportError:  # outside this project's .venv
 else:
     # Each module's steps and the world fixture register as plugins, so pytest-bdd sees all of them.
     pytest_plugins = ["steps.world", "steps.build_steps", "steps.run_steps", "steps.prompt_steps", "steps.log_steps",
-                      "steps.evidence_steps", "steps.boundary_steps", "steps.cli_steps", "steps.live_steps"]
+                      "steps.evidence_steps", "steps.cli_steps", "steps.live_steps"]
 
 
 def pytest_addoption(parser):
