@@ -17,6 +17,19 @@ receiver [UxPlay](https://github.com/FDH2/UxPlay) and ships as a
 | S2 | The parking gate: video only in Park, read from the stock Park getter; sleep, logging, config | Requirements settled; scenarios written and reviewed; step definitions and the Java gate next |
 | S3 | Coexisting with wireless CarPlay (ports, mDNS, who owns the screen) | Decisions OD-76 and OD-77 taken; not specified yet |
 
+There is **no receiver app yet**. So far the repository holds the S1 PC test tool (`tools/airplay_s1/`),
+read-only head-unit probes (`tools/unit-probes/`) and the specifications. The first receiver code is S2's
+plain-Java parking gate.
+
+## Roadmap
+
+1. **S2, the parking gate** (now): step definitions, then the gate as plain Java, tested on the PC.
+2. **The receiver on the head unit** (next, OD-99): cross-build UxPlay's AirPlay core for the unit
+   (Android 4.4, ARMv7) and show mirrored video through its hardware H.264 decoder. This is the
+   biggest untested risk.
+3. **The NEMESIS package**: the app, launched from NEMESIS Manager (OD-95), with its config and logs.
+4. **S3, coexisting with CarPlay**: fixed ports, mDNS, screen and audio ownership (OD-76, OD-77, OD-97).
+
 Everything is developed spec-first: owner decisions, then requirements, then Gherkin scenarios,
 then tests, then code. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
