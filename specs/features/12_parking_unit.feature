@@ -16,7 +16,9 @@ Feature: The parking gate on the owner's head unit
     When the receiver runs parked for 60 seconds with mirroring active
     Then the stick evidence shows the receiver's own getGearPStatus calls, their times and replies, every 200 ms
     And at most one call was pending at any time
-    And no Park listener and no BCM status request appear in its call trace
+    And any late return in the evidence is followed at once by the next call, then calls every 200 ms from it
+    And unexercised delay, hang and exact-200 ms cases are listed as unverified
+    And the receiver's own call trace and an integration review, not log silence alone, show no Park listener and no BCM status request
 
   @boundary @AIR-018 @AT-18 @OD-46 @OD-61
   Scenario: Leaving Park removes the image within 250 ms of the poll that sees it
@@ -24,7 +26,7 @@ Feature: The parking gate on the owner's head unit
     When the owner shifts out of Park and back while a timing camera records the screen
     Then the stick evidence correlates the first poll returning 0 with the image disappearing within 250 ms
     And the time from the actual shift to the image disappearing is recorded separately
-    And no frame appears while the car is out of Park
+    And no new frame appears from the first poll returning 0 until an on-time reply of 1 after the car is back in Park
 
   @failure @AIR-019 @AT-19 @OD-56
   Scenario: After a resume from sleep, video waits for a fresh on-time Park reading
@@ -53,6 +55,7 @@ Feature: The parking gate on the owner's head unit
     When the owner shifts out of Park and back, foot on the brake
     Then the owner heard the audio continue without a break
     And the video came back by itself on returning to Park, without reconnecting the iPhone
+    And the stick evidence correlates the on-time reply of 1 with the time the next frame appeared
 
   @boundary @AIR-023 @AT-23 @OD-55
   Scenario: Edits to the installed receiver.conf take effect at the next start
@@ -79,10 +82,21 @@ Feature: The parking gate on the owner's head unit
     When the owner installs an update of the package
     Then the stick evidence shows the shipped receiver.conf in place and a start record with the parking check on
 
+  @normal @AIR-035 @AT-35 @OD-54
+  Scenario Outline: A reinstall or a rebuilt package puts its shipped receiver.conf in place
+    Given the installed receiver.conf was edited to hold "video.require_park=<edited>"
+    When the owner <action>
+    Then the stick evidence shows the shipped receiver.conf in place and a start record with the parking check <state>
+
+    Examples:
+      | edited | action                                                          | state |
+      | false  | reinstalls the package                                          | on    |
+      | true   | installs a package rebuilt to ship "video.require_park=false"   | off   |
+
   @normal @AIR-038 @AT-38 @OD-59
   Scenario: Regulation state is logged and doesn't decide video
     Given the receiver is mirroring parked, with the parking check on
-    When the stock regulation state changes during the test
+    When the stock regulation state changes during the test, without the receiver or the owner modifying or spoofing it
     Then the stick evidence holds each regulation state with the gate state beside it
     And untested regulation states are listed as unverified
 

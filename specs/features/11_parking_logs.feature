@@ -5,6 +5,9 @@ Feature: Regulation evidence, the log cap and logging failures
   logging failure never changes the gate and shows at most one notice per app start (AIR-038 to
   AIR-040; OD-47, OD-49, OD-57 to OD-59).
 
+  Clock times, "runs for", "within 10 ms" and the default Park getter behaviour are as defined in
+  09_parking_gate.feature.
+
   @offline @normal @AIR-038 @AT-38 @OD-59
   Scenario: Regulation state is logged at start and on every change, and unavailable is named
     Given the stock regulation state is "restricted" when the receiver starts

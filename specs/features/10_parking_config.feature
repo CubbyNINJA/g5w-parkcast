@@ -6,7 +6,8 @@ Feature: The parking flag in receiver.conf, and what each start records
   screen says the check is off (AIR-023, AIR-025, AIR-026, AIR-035, AIR-036; OD-43 to OD-45,
   OD-54, OD-55, OD-60).
 
-  File contents are written as lines separated by " ; ".
+  File contents are written as lines separated by " ; ". Clock times, "runs for", "within 10 ms"
+  and the default Park getter behaviour are as defined in 09_parking_gate.feature.
 
   @offline @boundary @AIR-023 @AT-23 @OD-55
   Scenario Outline: receiver.conf is read strictly, and anything unclear turns the check on
@@ -47,9 +48,9 @@ Feature: The parking flag in receiver.conf, and what each start records
 
   @offline @normal @AIR-023 @AT-23 @OD-43
   Scenario: The flag is read from the package's install folder at every start
-    Given the package is installed in /data/nemesis/apps/ with receiver.conf holding "video.require_park=false"
+    Given the package is installed in /data/nemesis/apps/<id>/ with config/receiver.conf holding "video.require_park=false", and a decoy package/config/receiver.conf holding "video.require_park=true"
     When the receiver starts
-    Then it read the flag from config/receiver.conf in that install folder
+    Then the parking check is off
 
   @offline @normal @AIR-023 @AT-23 @OD-43
   Scenario: An edit takes effect at the next start, not during the running one
@@ -96,16 +97,18 @@ Feature: The parking flag in receiver.conf, and what each start records
   Scenario Outline: Every start records the flag, where it came from, the initial gate state and why
     Given the installed receiver.conf <state>
     When the receiver starts
-    Then its start record gives the parking check as <check>, from <source>, with the initial gate state and the reason
+    Then its start record gives the parking check as <check>, from <source>, with the initial gate state as <initial> and a reason naming <cause>
     And a failed read is named without logging any other contents of the file
 
     Examples:
-      | state                                       | check | source        |
-      | holds "video.require_park=true"             | on    | the file      |
-      | holds "video.require_park=false"            | off   | the file      |
-      | is missing                                  | on    | the fallback  |
-      | is unreadable                               | on    | the fallback  |
-      | holds "video.require_park=maybe ; pin=1234" | on    | the fallback  |
+      | state                                                      | check | source       | initial   | cause                         |
+      | holds "video.require_park=true"                            | on    | the file     | blocked   | the flag set to true          |
+      | holds "video.require_park=false"                           | off   | the file     | permitted | the flag set to false         |
+      | is missing                                                 | on    | the fallback | blocked   | the missing file              |
+      | is unreadable                                              | on    | the fallback | blocked   | the failed read               |
+      | holds "video.require_park=maybe ; pin=1234"                | on    | the fallback | blocked   | the invalid value             |
+      | holds "other.key=false"                                    | on    | the fallback | blocked   | the missing key               |
+      | holds "video.require_park=false ; video.require_park=true" | on    | the fallback | blocked   | the conflicting duplicate key |
 
   @offline @normal @AIR-026 @AT-26
   Scenario: Every gate change is logged with the state before, the state after and why
