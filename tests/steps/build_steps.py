@@ -125,7 +125,7 @@ def _(world):
     expected = dict(commit=world.upstream.master, version="1.74", dependencies=world.used_inventory.packages,
                     commands=world.compiler.commands, executable=str(exe),
                     sha256=hashlib.sha256(exe.read_bytes()).hexdigest(), build_dir=compiled["build"],
-                    source_dir=compiled["source"])
+                    source_dir=compiled["source"], build_root=str(world.work_root))
     for prov in (world.build_result.provenance, s1("build").load_provenance(world.work_root)):
         for field, value in expected.items():
             assert getattr(prov, field) == value, field
@@ -255,13 +255,15 @@ def _(world):
 
 @when("the build procedure runs from a clean build directory")
 def _(world):
-    world.host_first = world.host_build.build_clean(_fresh_dir("build-a"))
+    world.dest_first = _fresh_dir("build-a")
+    world.host_first = world.host_build.build_clean(world.dest_first)
 
 
 @when("it is repeated from a second clean build directory at the recorded commit")
 def _(world):
     time.sleep(1)  # the directory names carry the second they were made
-    world.host_second = world.host_build.build_clean(_fresh_dir("build-b"), pinned=world.host_first.provenance)
+    world.dest_second = _fresh_dir("build-b")
+    world.host_second = world.host_build.build_clean(world.dest_second, pinned=world.host_first.provenance)
 
 
 @then(parsers.re("both builds report UxPlay version " + Q.format("version") + " at the same commit"))
@@ -277,14 +279,21 @@ def _(world, version):
 
 @then("each build's provenance is saved with its commit, dependency versions, build commands, executable path and SHA-256")
 def _(world):
-    roots = [Path(r.provenance.build_root) for r in (world.host_first, world.host_second)]
-    assert roots[0] != roots[1], "both builds wrote to the same place"
-    for root in roots:
-        saved = s1("build").load_provenance(root)
-        for field in ("commit", "dependencies", "commands", "executable", "sha256"):
+    assert world.dest_first != world.dest_second
+    fields = ("commit", "version", "build_root", "source_dir", "build_dir", "executable", "sha256", "dependencies",
+              "commands")
+    for result, dest in ((world.host_first, world.dest_first), (world.host_second, world.dest_second)):
+        returned = result.provenance
+        assert Path(returned.build_root).resolve() == dest.resolve(), "the build didn't use the requested directory"
+        for d in (returned.source_dir, returned.build_dir, returned.executable):
+            assert Path(d).resolve().is_relative_to(dest.resolve()), d
+        saved = s1("build").load_provenance(dest)
+        for field in fields:
+            assert getattr(saved, field) == getattr(returned, field), field
+        for field in ("commit", "dependencies", "commands"):
             assert getattr(saved, field), field
-        assert Path(saved.executable).resolve().is_relative_to(root.resolve())
         assert saved.sha256 == hashlib.sha256(Path(saved.executable).read_bytes()).hexdigest()
+    assert world.host_second.provenance.commit == world.host_first.provenance.commit
 
 
 @then("neither build tree is inside version control")

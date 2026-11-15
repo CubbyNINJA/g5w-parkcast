@@ -261,7 +261,13 @@ def _(world, what):
 @given(parsers.re("a run with a complete readable log whose sessions have verdicts (?P<sessions>.+)"))
 def _(world, sessions):
     world.expected = [v.strip() for v in sessions.split(",")]
-    write_log(world, wrap(sessions_excerpt(world.expected)))
+    excerpt = sessions_excerpt(world.expected)
+    # Each session's deciding line, worked out from the fixture: sessions are separated by one LOST line.
+    world.decisive, start = [], 1
+    for v in world.expected:
+        world.decisive.append(log_line(world, start + DECISIVE[v] - 1))
+        start += len(SESSION[v]) + 1
+    write_log(world, wrap(excerpt))
 
 
 @given(parsers.re("a run containing a complete session whose verdict is " + VERDICT.format("verdict")))
@@ -350,7 +356,9 @@ def _(world):
     for n in world.required_cites:
         assert n in cites, f"the deciding line {n} isn't cited ({cites})"
     assert set(cites) <= set(_span(world, 1)), cites
-    assert set(j.cites) <= set(cites) and j.cites, "the run verdict must cite the lines its session rests on"
+    for n in world.required_cites:
+        assert n in j.cites, f"the run verdict doesn't cite the deciding line {n} ({j.cites})"
+    assert set(j.cites) <= set(cites)
 
 
 @then("the reason notes the earlier HEVC request")
@@ -373,7 +381,14 @@ def _(world):
 
 @then("every session's verdict is listed unchanged")
 def _(world):
-    assert [s.verdict for s in _judgement(world).sessions] == world.expected
+    j = _judgement(world)
+    assert [s.verdict for s in j.sessions] == world.expected
+    for i, (sv, line) in enumerate(zip(j.sessions, world.decisive), 1):
+        assert line in sv.cites, f"session {i} doesn't cite its deciding line {line} ({sv.cites})"
+        assert set(sv.cites) <= set(_span(world, i)), (i, sv.cites)
+    assert j.reason, "the run verdict has no reason"
+    deciding = [line for sv, line in zip(j.sessions, world.decisive) if sv.verdict == j.verdict]
+    assert set(deciding) & set(j.cites), f"the run's cites {j.cites} include no deciding line of a {j.verdict} session"
 
 
 @then(parsers.re("the session verdict remains " + VERDICT.format("verdict")))

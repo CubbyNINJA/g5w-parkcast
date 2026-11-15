@@ -1,8 +1,9 @@
 @S1 @OD-28
 Feature: One command, with predictable exits and no side effects on bad input
   The S1 tools are one command, "python tools/s1.py", with the commands check, build, run,
-  analyse, evaluate and summary. Usage errors change nothing; other failures stop before the
-  firewall is touched (AIR-031).
+  analyse, evaluate and summary. Usage errors change nothing. Detectable provenance and
+  output-location failures stop before firewall changes or receiver launch; failures after rule
+  creation follow cleanup and exit 1 (AIR-031, OD-29).
 
   @offline @normal @AIR-031 @AT-31
   Scenario Outline: Help prints usage and does nothing else
@@ -68,7 +69,7 @@ Feature: One command, with predictable exits and no side effects on bad input
     When this project's interpreter runs "tools/s1.py --help" as a subprocess
     Then the subprocess exits with code 0
     And its output names the commands check, build, run, analyse, evaluate and summary
-    And no file in the project is created or changed
+    And no file in the project, apart from its .venv and Python caches, is created or changed
 
   @offline @boundary @AIR-031 @AT-31
   Scenario: A NO-GO verdict is a completed command, not a failure

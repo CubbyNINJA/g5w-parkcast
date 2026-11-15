@@ -86,6 +86,14 @@ Feature: A temporary firewall rule for uxplay.exe only
     Then the run reports the residual rule "NEMESIS-AirPlay-S1" and its program path
     And the run does not report a clean cleanup
 
+  @offline @failure @AIR-005 @AT-05
+  Scenario: Cleanup whose removal reports success but leaves the run's rule is reported
+    Given a test run whose firewall rule was created
+    And removing a rule reports success but leaves it in the next listing
+    When the run ends by the owner ending the test
+    Then the run reports the residual rule "NEMESIS-AirPlay-S1" and its program path
+    And the run does not report a clean cleanup
+
   @host @normal @AIR-003 @AIR-004 @AIR-005 @AIR-030 @AT-03 @AT-04 @AT-05 @AT-30
   Scenario: The real rule's lifecycle on this PC when the owner cancels
     Given this PC's Windows Firewall

@@ -37,11 +37,13 @@ FORBIDDEN_FLAGS = {"-h265", "-vdmp", "-admp", "-vrtp", "-artp"}
 
 
 class RecordingFirewall:
-    """The real firewall backend, with every call and every listing recorded by the test."""
+    """The real firewall backend, with every call and listing recorded by the test, and Windows's
+    own view of all rules (through PowerShell) taken just after the run's rule is created."""
 
     def __init__(self, events: Events):
         self.inner = s1("firewall").WindowsFirewall()
         self.events = events
+        self.ps_during = None
 
     def active_profile(self):
         return self.inner.active_profile()
@@ -54,6 +56,7 @@ class RecordingFirewall:
     def create(self, rule):
         made = self.inner.create(rule)
         self.events.add("fw.create", id=made.id, asked=rule_fields(rule))
+        self.ps_during = _powershell_rules()
         return made
 
     def remove(self, rule_id):
@@ -61,40 +64,82 @@ class RecordingFirewall:
         return self.inner.remove(rule_id)
 
 
+class RecordedProc:
+    """The real process, with the test's own monotonic times for its start and every stop request."""
+
+    def __init__(self, inner, launcher):
+        self.inner = inner
+        self.launcher = launcher
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def stop(self, *args, **kwargs):
+        self.launcher.stop_times.append(time.monotonic())
+        return self.inner.stop(*args, **kwargs)
+
+
 class RecordingLauncher:
-    """The real launcher, keeping the process so a step can end it from outside the runner."""
+    """The real launcher. The test keeps the argv it was given, the process ID, and when it started."""
 
     def __init__(self, events: Events):
         self.inner = s1("runner").SubprocessLauncher()
         self.events = events
         self.procs = []
         self.argv = None
+        self.start_time = None
+        self.stop_times = []
 
     def start(self, argv, log):
         self.argv = tuple(argv)
+        self.start_time = time.monotonic()
         proc = self.inner.start(argv, log)
         self.procs.append(proc)
         self.events.add("proc.start", pid=proc.pid, argv=tuple(argv))
-        return proc
+        return RecordedProc(proc, self)
+
+
+SNAPSHOT_PS1 = Path(__file__).with_name("firewall_snapshot.ps1")
 
 
 def _powershell_rules() -> list[dict]:
-    """Every firewall rule as Windows itself lists it, independent of the code under test."""
-    script = ("Get-NetFirewallRule | Select-Object Name,DisplayName,Enabled,Direction,Action,Profile | "
-              "ConvertTo-Json -Compress")
-    out = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True,
-                         check=True, timeout=300).stdout
+    """Every firewall rule, with its program and port filters, as Windows itself lists it."""
+    out = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SNAPSHOT_PS1)],
+                         capture_output=True, encoding="utf-8-sig", check=True, timeout=600).stdout
     rows = json.loads(out) if out.strip() else []
     return [{k: str(v) for k, v in r.items()} for r in (rows if isinstance(rows, list) else [rows])]
 
 
-def _others(rows: list[dict]) -> list[dict]:
-    return sorted((r for r in rows if r["DisplayName"] != s1("firewall").RULE_NAME), key=lambda r: r["Name"])
+def _ps_owned(row: dict, build_root) -> bool:
+    """OD-27, worked out here from Windows's own fields rather than by the code under test."""
+    root = str(Path(build_root).resolve()).lower().rstrip("\\") + "\\"
+    program = row["Program"].lower()
+    return (row["DisplayName"] == s1("firewall").RULE_NAME and program.endswith("\\uxplay.exe")
+            and program.startswith(root))
 
 
-def _owned(rules, build_root) -> list:
+def _ps_others(rows: list[dict], build_root) -> list[dict]:
+    return sorted((r for r in rows if not _ps_owned(r, build_root)), key=lambda r: r["Name"])
+
+
+def _ps_mine(rows: list[dict], build_root) -> list[tuple]:
+    """Owned rules as comparable tuples: name, program, direction, action, profile, ports."""
+    return sorted((r["DisplayName"], r["Program"].lower(), r["Direction"], r["Action"], r["Profile"], r["Ports"])
+                  for r in rows if _ps_owned(r, build_root))
+
+
+def _saved_mine(rows: list[dict], build_root) -> list[tuple]:
+    """The runner's saved rules in the same form, so the two views can be compared field by field."""
+    direction = {"in": "Inbound", "out": "Outbound"}
+    action = {"allow": "Allow", "block": "Block"}
     fw = s1("firewall")
-    return [r for r in rules if fw.is_owned(fw.Rule(**r) if isinstance(r, dict) else r, build_root)]
+    out = []
+    for r in rows:
+        if fw.is_owned(fw.Rule(**r), build_root):
+            ports = "Any/Any" if r["ports"] is None else str(r["ports"])
+            out.append((r["name"], r["program"].lower(), direction[r["direction"]], action[r["action"]],
+                        ", ".join(r["profiles"]), ports))
+    return sorted(out)
 
 
 def _host_run(w, owner) -> None:
@@ -102,10 +147,12 @@ def _host_run(w, owner) -> None:
     w.real_fw = RecordingFirewall(w.events)
     w.real_launcher = RecordingLauncher(w.events)
     w.ps_before = _powershell_rules()
+    w.saved_dir = None
     w.host_run_dir = RUNS / time.strftime("host-%Y%m%d-%H%M%S")
     w.record = s1("runner").run(w.provenance, w.host_run_dir, firewall=w.real_fw, launcher=w.real_launcher,
                                 clock=s1("runner").SystemClock(), owner=owner, timeout=600)
     w.ps_after = _powershell_rules()
+    w.saved_dir = w.host_run_dir
 
 
 @given("this PC's Windows Firewall")
@@ -152,17 +199,13 @@ def _(world):
 
 @then("the firewall rule lists from before, during and after the run are saved")
 def _(world):
-    observed = [e["rules"] for e in world.events.of("fw.list")]
-    saved = {k: read_json(world.host_run_dir / f"firewall-{k}.json") for k in ("before", "during", "after")}
-    for name, rows in saved.items():
-        assert any(_same(rows, seen) for seen in observed), f"firewall-{name}.json isn't a listing the backend returned"
+    saved = {k: read_json(world.saved_dir / f"firewall-{k}.json") for k in ("before", "during", "after")}
+    windows = {"before": world.ps_before, "during": world.real_fw.ps_during, "after": world.ps_after}
+    assert windows["during"] is not None, "the run's rule was never created"
+    for k in saved:
+        assert _saved_mine(saved[k], world.build_root) == _ps_mine(windows[k], world.build_root), \
+            f"firewall-{k}.json doesn't match Windows's own rules at that point"
     world.saved_lists = saved
-
-
-def _same(saved_rows, observed_rows) -> bool:
-    def key(r):
-        return (r["id"], r["name"], r["program"])
-    return sorted(map(key, saved_rows)) == sorted(map(key, observed_rows))
 
 
 @then("they show the leftover rule removed before the run's rule was created")
@@ -180,22 +223,22 @@ def _(world):
     assert (asked["direction"], asked["action"], asked["ports"]) == ("in", "allow", None)
     assert asked["program"] == world.provenance.executable
     assert asked["profiles"] == ("Public",)
-    during = _owned(world.saved_lists["during"], world.build_root)
-    assert len(during) == 1 and during[0]["program"] == world.provenance.executable
+    during = _ps_mine(world.real_fw.ps_during, world.build_root)
+    assert during == [(s1("firewall").RULE_NAME, world.provenance.executable.lower(), "Inbound", "Allow", "Public",
+                       "Any/Any")], during
 
 
 @then("they show no owned rule after the run")
 @then("they show the run's rule while the run was active and no owned rule after it")
 def _(world):
     assert len(world.events.of("fw.create")) == 1
-    final = world.events.of("fw.list")[-1]
-    assert _owned(final["rules"], world.build_root) == []
-    assert not [r for r in world.ps_after if r["DisplayName"] == s1("firewall").RULE_NAME]
+    assert len(_ps_mine(world.real_fw.ps_during, world.build_root)) == 1
+    assert _ps_mine(world.ps_after, world.build_root) == []
 
 
 @then("they show every rule the runner doesn't own unchanged")
 def _(world):
-    assert _others(world.ps_before) == _others(world.ps_after)
+    assert _ps_others(world.ps_before, world.build_root) == _ps_others(world.ps_after, world.build_root)
 
 
 @then("the run reports UxPlay exiting mid-test")
@@ -218,13 +261,20 @@ def _(world):
 
 def _live(world, expect_reason: str) -> None:
     RUNS.mkdir(exist_ok=True)
+    world.events = Events()
+    world.real_fw = RecordingFirewall(world.events)
+    world.real_launcher = RecordingLauncher(world.events)
+    world.build_root = world.provenance.build_root
+    world.ps_before = _powershell_rules()
     before = {p.name for p in RUNS.iterdir() if p.is_dir()}
-    world.live_rc = s1("cli").main(["run"])
+    world.live_rc = s1("cli").main(["run"], deps=s1("cli").Deps.real(firewall=world.real_fw,
+                                                                      launcher=world.real_launcher))
+    world.ps_after = _powershell_rules()
     new = [RUNS / n for n in {p.name for p in RUNS.iterdir() if p.is_dir()} - before]
     world.new_runs = new
     world.expect_reason = expect_reason
     if len(new) == 1:
-        world.live_dir = LIVE["dir"] = new[0]
+        world.live_dir = world.saved_dir = LIVE["dir"] = new[0]
 
 
 @when(parsers.re("the runner launches " + Q.format("name") + ", the owner starts Screen Mirroring to it and then ends the test at the console"))
@@ -261,11 +311,12 @@ def _contains(cmd, words) -> bool:
 
 @then("the recorded launch command is the one the offline launch scenarios specify")
 def _(world):
-    saved = read_json(_latest(world) / "run.json")["command"]
-    assert saved[0] == world.provenance.executable
+    launched = list(world.real_launcher.argv)
+    assert launched[0] == world.provenance.executable
     for flags in EXPECTED_FLAGS:
-        assert _contains(saved, flags), flags
-    assert not set(saved) & FORBIDDEN_FLAGS
+        assert _contains(launched, flags), flags
+    assert not set(launched) & FORBIDDEN_FLAGS
+    assert read_json(_latest(world) / "run.json")["command"] == launched, "the saved command isn't the one launched"
 
 
 @then(parsers.re("the run records the launch time, the deadline 600 seconds later, the end time and the reason " + Q.format("reason")))
@@ -275,21 +326,34 @@ def _(world, reason):
     assert rec["deadline"] == rec["launched_at"] + 600
     assert rec["launched_at"] <= rec["ended_at"] <= rec["deadline"]
     assert rec["reason"] == reason
+    # The test's own monotonic measurements, not the runner's timestamps.
+    launcher = world.real_launcher
+    assert launcher.start_time is not None and launcher.stop_times, "the test saw no launch or no stop request"
+    measured = launcher.stop_times[0] - launcher.start_time
+    assert abs((rec["ended_at"] - rec["launched_at"]) - measured) <= 2.0, (rec, measured)
     if reason == "timeout":
+        assert 598.0 <= measured <= 605.0, f"stopped {measured:.1f} s after launch"
         assert rec["ended_at"] == rec["deadline"]
+    else:
+        assert measured < 598.0
 
 
 @then("no UxPlay process launched by the run is still running")
 def _(world):
     rec = read_json(_latest(world) / "run.json")
-    assert rec["residual_pid"] is None
-    out = subprocess.run(["tasklist", "/FI", f"PID eq {rec['pid']}", "/NH"], capture_output=True, text=True).stdout
-    assert str(rec["pid"]) not in out, f"process {rec['pid']} is still running"
+    procs = world.real_launcher.procs
+    assert len(procs) == 1, "the test saw no single UxPlay launch"
+    pid = procs[0].pid
+    assert rec["pid"] == pid and rec["residual_pid"] is None
+    res = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    assert not [l for l in res.stdout.splitlines() if l.split(",")[1:2] == [f'"{pid}"']], f"process {pid} is still running"
 
 
 @then("no rule the runner owns remains in the firewall")
 def _(world):
-    assert not [r for r in _powershell_rules() if r["DisplayName"] == s1("firewall").RULE_NAME]
+    assert _ps_mine(world.ps_after, world.build_root) == []
+    assert _ps_others(world.ps_before, world.build_root) == _ps_others(world.ps_after, world.build_root)
 
 
 @then("the log starts with the runner's start marker and ends with its end marker and a newline")
@@ -356,17 +420,29 @@ def _(world):
     assert world.rederived_report == read_json(_latest(world) / "report.json")
 
 
+def _sessions_from_text(lines: list[str]) -> list[range]:
+    """Each session's lines, found from the log text: a session runs from one connection request
+    to the line before the next."""
+    starts = [i for i, l in enumerate(lines, 1) if "connection request from" in l]
+    return [range(s, e) for s, e in zip(starts, starts[1:] + [len(lines) + 1])]
+
+
 @then("every cited line number holds the message the observation names")
 def _(world):
     lines = (_latest(world) / "uxplay.log").read_text(encoding="utf-8").splitlines()
+    spans = _sessions_from_text(lines)
+    sessions = world.rederived_report["sessions"]
+    assert [s["start_line"] for s in sessions] == [sp.start for sp in spans], "session boundaries differ from the log"
     checked = 0
-    for session in world.rederived_report["sessions"]:
+    for session, span in zip(sessions, spans):
         for key, obs in session.items():
             if isinstance(obs, dict) and "line" in obs:
-                assert isinstance(obs["line"], int) and 1 <= obs["line"] <= len(lines), (key, obs)
+                assert isinstance(obs["line"], int) and obs["line"] in span, (key, obs, span)
                 assert obs.get("message") and any(m in obs["message"] for m in KNOWN_MESSAGES), (key, obs)
                 assert obs["message"] in lines[obs["line"] - 1], (key, obs)
                 checked += 1
+    for sv, span in zip(world.rederived_verdict["sessions"], spans):
+        assert set(sv["cites"]) <= set(span), (sv["cites"], span)
     assert checked, "the report has no observations to check"
 
 
@@ -391,14 +467,14 @@ def _(world):
 def _(world, text):
     d = _latest(world)
     lines = (d / "uxplay.log").read_text(encoding="utf-8").splitlines()
-    report = read_json(d / "report.json")
     verdict = read_json(d / "verdict.json")
-    starts = [s["start_line"] for s in report["sessions"]] + [len(lines) + 1]
+    spans = _sessions_from_text(lines)
+    assert len(spans) == len(verdict["sessions"]), "the verdict's sessions don't match the log's connections"
     found = False
     for i, s in enumerate(verdict["sessions"]):
         if s["verdict"] != "GO":
             continue
-        span = range(starts[i], starts[i + 1])
+        span = spans[i]
         assert set(s["cites"]) <= set(span), "a GO session cites a line outside itself"
         # Independently of the evaluator: the session's own lines hold a connection and an h264 codec line.
         own = [lines[n - 1] for n in span]

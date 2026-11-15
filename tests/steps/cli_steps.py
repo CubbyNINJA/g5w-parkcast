@@ -128,7 +128,7 @@ def _(world):
 
 
 def _project_files() -> dict[str, str]:
-    skip = {".venv", ".astra", "runs", "__pycache__", ".pytest_cache"}
+    skip = {".venv", "__pycache__", ".pytest_cache"}  # the interpreter and its caches, as the step says
     return {k: v for k, v in snapshot(PROJECT).items()
             if not set(Path(k).relative_to(PROJECT).parts) & skip}
 
@@ -153,7 +153,7 @@ def _(world):
         assert command in world.proc.stdout, command
 
 
-@then("no file in the project is created or changed")
+@then("no file in the project, apart from its .venv and Python caches, is created or changed")
 def _(world):
     assert world.after == world.before
 

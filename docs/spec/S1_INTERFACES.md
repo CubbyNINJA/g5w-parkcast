@@ -141,7 +141,9 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
 
 - `main(argv, deps=None) -> int`, and
   `Deps(work_root, runs_root, firewall, launcher, clock, owner, upstream, compiler, inventory)`.
-- With no `deps`, it uses the real backends.
+- With no `deps`, it uses the real backends. `Deps.real(**overrides)` builds the real set with
+  some backends swapped. The live tests use it to put recording wrappers around the real firewall
+  and launcher. The runner only uses a process through `pid`, `poll()`, `stop()` and `alive`.
 - Commands: `check`, `build`, `run`, `analyse <log> [-o report]` and `evaluate <run-dir>`.
   `evaluate` writes `report.json` and `verdict.json` beside the log, or neither. The last command
   is `summary`.

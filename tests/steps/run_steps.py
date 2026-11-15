@@ -391,7 +391,8 @@ def _(world):
 
 @then("the run reports the process-creation error")
 def _(world):
-    assert world.events.of("proc.create.failed")
+    created, failed = world.events.first("fw.create"), world.events.first("proc.create.failed")
+    assert 0 <= created < failed, "the rule must exist before process creation is attempted"
     assert rec(world).reason == "failed to start"
     assert any("process" in e.lower() for e in world.record.errors)
 
