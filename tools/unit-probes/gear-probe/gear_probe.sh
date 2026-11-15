@@ -36,6 +36,9 @@ fi
 
 BUILD=$(getprop ro.build.version.incremental)
 note "gear probe start; build $(getprop ro.build.product) / $BUILD"
+# Build and version properties, for the firmware-family check (OD-47). Read-only; keys that
+# could identify the unit or car (serial, IMEI, MAC, VIN) are left out.
+getprop | grep -i -E "build|version|cvev|firmware|\.sw\." | grep -v -i -E "serial|imei|mac|vin|bt\.addr|wifi" > "$P/build-props.txt" 2>&1
 service list > "$P/service-list.txt" 2>&1
 GUARD_SVC=no
 while IFS= read -r _l; do

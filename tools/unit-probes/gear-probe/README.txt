@@ -6,4 +6,5 @@ RUN: copy this folder's NEMESIS.data to the drive root, insert, tap Yes, then sh
 say (or by stopwatch from the moment you tap Yes):
    0-15 s P   |  15-30 s R  |  30-45 s N  |  45-60 s D  |  60-90 s back to P
 Wait for "Gear probe done". Removes the root NEMESIS.data when it starts.
-Output: NEMESIS-diag/gear-probe/.
+Output: NEMESIS-diag/gear-probe/ (readings, logcat lines, and the unit's build/version
+properties, with serial, IMEI, MAC and VIN keys left out).
