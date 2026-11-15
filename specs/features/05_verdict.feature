@@ -13,29 +13,23 @@ Feature: GO, NO-GO or INCONCLUSIVE, with the reason and the lines behind it
     And the verdict cites the log lines it rests on
 
     Examples:
-      | what happened                                    | verdict | reason                           |
-      | H.264 mirroring started                          | GO      | H.264 mirroring started          |
-      | the iPhone requested HEVC                        | NO-GO   | HEVC requested                   |
-      | no video stream arrived                          | NO-GO   | connected but no H.264 mirroring |
-      | only mirroring setup and the connection were logged | NO-GO | connected but no H.264 mirroring |
+      | what happened                                       | verdict | reason                           |
+      | H.264 mirroring started                             | GO      | H.264 mirroring started          |
+      | the iPhone requested HEVC                           | NO-GO   | HEVC requested                   |
+      | no video stream arrived                             | NO-GO   | connected but no H.264 mirroring |
+      | only mirroring setup and the connection were logged | NO-GO   | connected but no H.264 mirroring |
+      | only audio played                                   | NO-GO   | connected but no H.264 mirroring |
 
   @offline @boundary @AIR-010 @AT-10 @OD-26
-  Scenario: A run with no session is INCONCLUSIVE because no iPhone connected
-    Given a complete log in which no iPhone ever connected
+  Scenario Outline: A run with no session is INCONCLUSIVE because no iPhone connected
+    Given a complete log in which <what happened>
     When the evaluator judges the run
     Then the run's verdict is INCONCLUSIVE with the reason "no iPhone connected"
     And no session verdict is listed
 
-  @offline @failure @AIR-010 @AT-10
-  Scenario Outline: Things short of a started H.264 stream are never GO
-    Given a complete log in which <what happened>
-    When the evaluator judges the run
-    Then the run's verdict is not GO
-
     Examples:
       | what happened                                         |
-      | an iPhone connected but sent nothing else             |
-      | only audio played                                     |
+      | no iPhone ever connected                              |
       | the receiver advertised H.264 and no iPhone connected |
 
   @offline @boundary @AIR-010 @AT-10 @OD-19
@@ -55,7 +49,7 @@ Feature: GO, NO-GO or INCONCLUSIVE, with the reason and the lines behind it
 
   @offline @normal @AIR-010 @AT-10 @OD-12 @OD-18 @OD-26
   Scenario Outline: The run's verdict comes from its sessions, whatever their order
-    Given an error-free run with complete sessions whose verdicts are <sessions>
+    Given a run with a complete readable log whose sessions have verdicts <sessions>
     When the evaluator judges the run
     Then the run's verdict is <verdict>
     And every session's verdict is listed unchanged
@@ -106,8 +100,8 @@ Feature: GO, NO-GO or INCONCLUSIVE, with the reason and the lines behind it
 
   @offline @boundary @AIR-011 @AT-11
   Scenario: A verdict that rests on something missing names how far the log was read
-    Given a complete log with one session in which no video stream arrived
+    Given a complete log with one session in which only mirroring setup and the connection were logged
     And the run ended at second 600 by the timeout
     When the evaluator judges the run
     Then the reason states the log was read to its last line and the run ended at second 600
-    And the verdict cites no line as showing a video stream
+    And the verdict cites only the connection line, not the setup lines

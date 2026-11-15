@@ -1,10 +1,10 @@
 """Fakes for the S1 step definitions.
 
-Every fake writes what it was asked to do into one shared, ordered event list, so scenarios can
-check order ("stale rules removed before the new rule is created", "UxPlay stopped before
-cleanup"). Each event carries the controlled clock's time. Production types (Rule,
-FirewallError, BuildError) are imported lazily from airplay_s1, so a missing implementation
-fails a scenario rather than collection.
+Every fake writes what it was actually asked to do into one shared, ordered event list, with the
+controlled clock's time and immutable copies of the arguments and results. Steps check those
+events, not what the code under test says it did. Production types (Rule, FirewallError,
+BuildError, CaptureError) are imported lazily from airplay_s1, so a missing implementation fails
+a scenario rather than collection.
 """
 
 from __future__ import annotations
@@ -71,8 +71,18 @@ class FakeClock:
         self.t = target
 
 
+def rule_fields(rule) -> dict:
+    """An immutable copy of a rule's fields, as the fake firewall received or returned it."""
+    d = dataclasses.asdict(rule)
+    d["profiles"] = tuple(d["profiles"])
+    return d
+
+
 class FakeFirewall:
-    """In-memory Windows Firewall. Rules are airplay_s1.firewall.Rule (a dataclass with an `id`)."""
+    """In-memory Windows Firewall. Rules are airplay_s1.firewall.Rule (a dataclass with an `id`).
+
+    Failure modes: fail_create, fail_remove (remove raises), remove_no_effect (remove returns
+    normally but the rule stays, as a backend that silently fails would)."""
 
     def __init__(self, events: Events, profile: str = "Public"):
         self.events = events
@@ -80,6 +90,7 @@ class FakeFirewall:
         self.rules: dict[str, object] = {}
         self.fail_create = False
         self.fail_remove = False
+        self.remove_no_effect = False
         self._ids = itertools.count(1)
 
     def seed(self, rule) -> object:
@@ -91,78 +102,123 @@ class FakeFirewall:
         return self.profile
 
     def list_rules(self) -> list:
-        self.events.add("fw.list")
-        return list(self.rules.values())
+        rules = list(self.rules.values())
+        self.events.add("fw.list", ids=tuple(r.id for r in rules), rules=tuple(rule_fields(r) for r in rules))
+        return rules
 
     def create(self, rule):
+        asked = rule_fields(rule)
         if self.fail_create:
-            self.events.add("fw.create.failed")
+            self.events.add("fw.create.failed", asked=asked)
             raise s1("firewall").FirewallError("creating firewall rules fails (fake)")
         rule = dataclasses.replace(rule, id=f"run-{next(self._ids)}")
         self.rules[rule.id] = rule
-        self.events.add("fw.create", id=rule.id)
+        self.events.add("fw.create", id=rule.id, asked=asked)
         return rule
 
     def remove(self, rule_id: str) -> None:
         self.events.add("fw.remove", id=rule_id)
         if self.fail_remove:
             raise s1("firewall").FirewallError("removing firewall rules fails (fake)")
-        self.rules.pop(rule_id, None)
+        if not self.remove_no_effect:
+            self.rules.pop(rule_id, None)
 
 
 class FakeProc:
     _pids = itertools.count(4100)
 
-    def __init__(self, events: Events, ignores_stop: bool):
+    def __init__(self, events: Events, clock: FakeClock, log_path: Path, ignores_stop: bool, stop_delay: float):
         self.events = events
+        self.clock = clock
+        self.log_path = log_path
         self.pid = next(self._pids)
         self.exit_code: int | None = None
         self.ignores_stop = ignores_stop
+        self.stop_delay = stop_delay
 
     @property
     def alive(self) -> bool:
         return self.exit_code is None
 
+    def exit(self, code: int) -> None:
+        if self.exit_code is None:
+            self.exit_code = code
+            log = self.log_path.read_text(encoding="utf-8", errors="replace") if self.log_path.is_file() else ""
+            self.events.add("proc.exit", pid=self.pid, code=code, log_at_exit=log)
+
     def poll(self) -> int | None:
         return self.exit_code
 
     def stop(self, timeout: float = 5.0) -> bool:
+        """Ask the process to stop and wait up to `timeout` seconds. It exits after stop_delay."""
         self.events.add("proc.stop", pid=self.pid)
         if self.ignores_stop:
+            self.clock.sleep(timeout)
             return False
-        if self.exit_code is None:
-            self.exit_code = 0
+        if self.stop_delay > timeout:
+            self.clock.sleep(timeout)
+            return False
+        self.clock.sleep(self.stop_delay)
+        self.exit(0)
         return True
 
 
 class FakeLauncher:
-    """Starts a fake UxPlay. `lines` are (second, text) pairs written to the run's log."""
+    """Starts a fake UxPlay that writes `lines` ((second, text) pairs) to the run's log.
+
+    By default it prints UxPlay's banner and one diagnostic line just after launch. Failure
+    modes: exit_at_once, exit_at, ignores_stop, stop_delay, capture_fails (the process starts
+    but its output can't be attached), create_fails (process creation raises OSError)."""
+
+    BANNER = "UxPlay 1.74: An Open-Source AirPlay mirroring and audio-streaming server."
+    DIAGNOSTIC = "fake diagnostic line from UxPlay"
 
     def __init__(self, events: Events, clock: FakeClock):
         self.events = events
         self.clock = clock
-        self.lines: list[tuple[float, str]] = []
+        self.lines: list[tuple[float, str]] = [(0.5, self.BANNER), (0.6, self.DIAGNOSTIC)]
         self.exit_at_once: int | None = None
         self.exit_at: float | None = None
         self.ignores_stop = False
+        self.stop_delay = 2.0
+        self.capture_fails = False
+        self.create_fails = False
         self.procs: list[FakeProc] = []
+        self.emitted: list[str] = []
         self.log_at_start: str | None = None
-        self.argv: list[str] | None = None
+        self.argv: tuple[str, ...] | None = None
 
     def start(self, argv: list[str], log):
-        self.argv = list(argv)
+        self.argv = tuple(argv)
+        if self.create_fails:
+            self.events.add("proc.create.failed", argv=tuple(argv))
+            raise OSError(2, "fake: the system cannot create the process")
         log.flush()
-        self.log_at_start = Path(log.name).read_text(encoding="utf-8", errors="replace")
-        self.events.add("proc.start", argv=list(argv))
-        proc = FakeProc(self.events, self.ignores_stop)
+        log_path = Path(log.name)
+        self.log_at_start = log_path.read_text(encoding="utf-8", errors="replace")
+        proc = FakeProc(self.events, self.clock, log_path, self.ignores_stop, self.stop_delay)
         self.procs.append(proc)
+        self.events.add("proc.start", pid=proc.pid, argv=tuple(argv))
+        if self.capture_fails:
+            raise s1("runner").CaptureError("fake: UxPlay's output can't be attached to the log", proc=proc)
         if self.exit_at_once is not None:
-            proc.exit_code = self.exit_at_once
+            proc.exit(self.exit_at_once)
             return proc
+
+        def write(text):
+            if not proc.alive:
+                return
+            if log.closed:
+                self.events.add("log.write.after.close", text=text)
+                return
+            log.write((text + "\n").encode("utf-8"))
+            log.flush()
+            self.emitted.append(text)
+
         for t, text in self.lines:
-            self.clock.at(t, lambda text=text: proc.alive and not log.closed and (log.write((text + "\n").encode("utf-8")), log.flush()))
+            self.clock.at(t, lambda text=text: write(text))
         if self.exit_at is not None:
-            self.clock.at(self.exit_at, lambda: setattr(proc, "exit_code", 1) if proc.alive else None)
+            self.clock.at(self.exit_at, lambda: proc.exit(1))
         return proc
 
 
@@ -202,13 +258,14 @@ class FakeUpstream:
         return self.versions.get(commit, "1.74")
 
     def checkout(self, commit: str, dest: Path) -> None:
-        self.events.add("build.checkout", commit=commit)
+        self.events.add("build.checkout", commit=commit, dest=str(dest))
         Path(dest).mkdir(parents=True, exist_ok=True)
 
 
 class FakeCompiler:
-    """mode: "ok" writes uxplay.exe; "fail" writes part of it and raises BuildError;
-    "interrupt" writes part of it and raises KeyboardInterrupt."""
+    """mode: "ok" writes uxplay.exe; "fail" writes part of it, then raises BuildError;
+    "fail-early" raises BuildError before touching any output; "interrupt" writes part of it,
+    then raises KeyboardInterrupt."""
 
     def __init__(self, events: Events):
         self.events = events
@@ -216,7 +273,9 @@ class FakeCompiler:
         self.commands = ["cmake -G Ninja ..", "ninja"]
 
     def compile(self, source_dir: Path, build_dir: Path) -> Path:
-        self.events.add("build.compile", source=str(source_dir), build=str(build_dir))
+        self.events.add("build.compile", source=str(source_dir), build=str(build_dir), mode=self.mode)
+        if self.mode == "fail-early":
+            raise s1("build").BuildError("compiler failed before writing anything (fake)")
         build_dir = Path(build_dir)
         build_dir.mkdir(parents=True, exist_ok=True)
         exe = build_dir / "uxplay.exe"

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import time
 from pathlib import Path
 
 import pytest
@@ -16,22 +18,17 @@ UCRT64 = "the UCRT64 environment"
 DECODER = "a GStreamer H.264 decoder"
 
 
-def _build(w, pinned=None):
-    w.used_inventory = getattr(w, "inventory", None) or _full_inventory(w)
-    try:
-        w.build_result = s1("build").build(
-            inventory=w.used_inventory, upstream=w.upstream,
-            compiler=w.compiler, work_root=w.work_root, owner=w.owner, pinned=pinned)
-    except KeyboardInterrupt:
-        w.build_result = None
-        w.interrupted = True
-    return w.build_result
-
-
-def _full_inventory(w):
+def _inventory(packages: bool = True, decoder: bool = True):
     prereqs = s1("prereqs")
-    return prereqs.Inventory(ucrt64=True, packages={p: "1.0" for p in prereqs.REQUIRED_PACKAGES},
-                             gst_elements={"avdec_h264"})
+    return prereqs.Inventory(ucrt64=True, packages={p: f"1.0-{i}" for i, p in enumerate(prereqs.REQUIRED_PACKAGES)},
+                             gst_elements={"avdec_h264"} if decoder else set())
+
+
+def _build(w, pinned=None):
+    w.used_inventory = getattr(w, "inventory", None) or _inventory()
+    w.build_result = s1("build").build(inventory=w.used_inventory, upstream=w.upstream, compiler=w.compiler,
+                                       work_root=w.work_root, owner=w.owner, pinned=pinned)
+    return w.build_result
 
 
 def _not_selectable(w):
@@ -42,9 +39,7 @@ def _not_selectable(w):
 
 @given("a prerequisite inventory with every required MSYS2 UCRT64 tool and package")
 def _(world):
-    prereqs = s1("prereqs")
-    world.inventory = prereqs.Inventory(ucrt64=True, packages={p: "1.0" for p in prereqs.REQUIRED_PACKAGES},
-                                        gst_elements=set())
+    world.inventory = _inventory(decoder=False)
 
 
 @given("the inventory lists a GStreamer H.264 decoder")
@@ -82,8 +77,10 @@ def _(world):
 
 @then(parsers.re("the check fails naming " + Q.format("item")))
 def _(world, item):
-    assert not world.build_result.check.ok
-    assert item in world.build_result.check.missing
+    check = world.build_result.check
+    assert not check.ok
+    assert check.missing == [item]
+    assert world.build_result.status == "blocked"
 
 
 @then("the build is never invoked")
@@ -116,19 +113,22 @@ def _(world):
 
 @then(parsers.re("the provenance records commit " + Q.format("commit")))
 def _(world, commit):
-    prov = world.build_result.provenance
-    assert prov.commit == commit
+    assert world.build_result.status == "built"
+    assert world.build_result.provenance.commit == commit
     assert s1("build").load_provenance(world.work_root).commit == commit
 
 
 @then("the provenance records the dependency versions, the build commands, the executable path and its SHA-256")
 def _(world):
-    prov = world.build_result.provenance
-    assert prov.dependencies == world.used_inventory.packages
-    assert prov.commands == world.compiler.commands
-    exe = Path(prov.executable)
-    assert exe.is_file()
-    assert prov.sha256 == hashlib.sha256(exe.read_bytes()).hexdigest()
+    compiled = world.events.of("build.compile")[-1]
+    exe = Path(compiled["build"]) / "uxplay.exe"
+    expected = dict(commit=world.upstream.master, version="1.74", dependencies=world.used_inventory.packages,
+                    commands=world.compiler.commands, executable=str(exe),
+                    sha256=hashlib.sha256(exe.read_bytes()).hexdigest(), build_dir=compiled["build"],
+                    source_dir=compiled["source"])
+    for prov in (world.build_result.provenance, s1("build").load_provenance(world.work_root)):
+        for field, value in expected.items():
+            assert getattr(prov, field) == value, field
 
 
 @then("the source and build trees are outside version control")
@@ -142,7 +142,7 @@ def _(world):
 def _(world, commit):
     world.upstream.master = commit
     world.upstream.versions[commit] = "1.74"
-    world.recorded = _build(world).provenance
+    assert _build(world).status == "built"
     world.events.clear()
 
 
@@ -165,17 +165,29 @@ def _(world, commit):
 
 @given("an executable left by an earlier build in the build tree")
 def _(world):
-    _build(world)
-    assert world.build_result.provenance is not None
+    assert _build(world).status == "built"
+    world.earlier_exe = Path(world.build_result.provenance.executable)
+    world.earlier_bytes = world.earlier_exe.read_bytes()
     world.events.clear()
+
+
+@given("the compiler will fail before changing any output")
+def _(world):
+    world.compiler.mode = "fail-early"
 
 
 @then("the failure is reported")
 def _(world):
-    if world.interrupted:
-        return
-    assert world.build_result.status == "failed"
-    assert world.build_result.error
+    result = world.build_result
+    assert result.status in ("failed", "interrupted")
+    assert result.error
+    if world.compiler.mode == "interrupt":
+        assert result.status == "interrupted" and "interrupt" in result.error.lower()
+
+
+@then("the earlier executable's bytes are unchanged")
+def _(world):
+    assert world.earlier_exe.read_bytes() == world.earlier_bytes
 
 
 @then("no executable is recorded as this build's output")
@@ -189,7 +201,7 @@ def _(world):
     _not_selectable(world)
 
 
-@given("a build that has written a partial executable")
+@given("a compiler that writes a partial executable before it stops")
 def _(world):
     world.compiler.mode = "fail"
 
@@ -202,7 +214,7 @@ def _(world, ending):
 
 @then("the partial executable is not recorded as a successful build output")
 def _(world):
-    assert world.build_result is None or world.build_result.provenance is None
+    assert world.build_result.provenance is None
     assert not (world.work_root / "provenance.json").exists()
 
 
@@ -214,15 +226,21 @@ def _(world):
 @then("it stops before building")
 def _(world):
     assert world.build_result.status == "stopped"
-    assert not world.events.of("build.compile")
+    assert not world.events.of("build.checkout", "build.compile")
 
 
 @then(parsers.re("it asks the owner which version to build, naming version " + Q.format("version")))
 def _(world, version):
-    assert any(version in q for q in world.owner.asked)
+    assert len(world.owner.asked) == 1 and version in world.owner.asked[0]
 
 
 # --- @host: the real build on this PC -------------------------------------------------------
+
+def _fresh_dir(label: str) -> Path:
+    d = Path(s1("build").DEFAULT_WORK_ROOT) / time.strftime(f"{label}-%Y%m%d-%H%M%S")
+    assert not d.exists(), f"{d} already exists, so it isn't a clean directory"
+    return d
+
 
 @given("this PC's MSYS2 UCRT64 environment")
 def _(world):
@@ -231,21 +249,27 @@ def _(world):
 
 @when("the prerequisite check runs and its inventory is saved")
 def _(world):
-    world.host_check = world.host_build.check_and_save()
+    world.inventory_dir = _fresh_dir("inventory")
+    world.host_check = world.host_build.check_and_save(world.inventory_dir)
 
 
 @when("the build procedure runs from a clean build directory")
 def _(world):
-    world.host_first = world.host_build.build_clean()
+    world.host_first = world.host_build.build_clean(_fresh_dir("build-a"))
 
 
 @when("it is repeated from a second clean build directory at the recorded commit")
 def _(world):
-    world.host_second = world.host_build.build_clean(pinned=world.host_first.provenance)
+    time.sleep(1)  # the directory names carry the second they were made
+    world.host_second = world.host_build.build_clean(_fresh_dir("build-b"), pinned=world.host_first.provenance)
 
 
 @then(parsers.re("both builds report UxPlay version " + Q.format("version") + " at the same commit"))
 def _(world, version):
+    assert world.host_check.ok, world.host_check.missing
+    saved = json.loads((world.inventory_dir / "inventory.json").read_text(encoding="utf-8"))
+    assert saved["ucrt64"] is True and "avdec_h264" in saved["gst_elements"]
+    assert set(s1("prereqs").REQUIRED_PACKAGES) <= set(saved["packages"])
     a, b = world.host_first.provenance, world.host_second.provenance
     assert a.version == b.version == version
     assert a.commit == b.commit
@@ -253,15 +277,19 @@ def _(world, version):
 
 @then("each build's provenance is saved with its commit, dependency versions, build commands, executable path and SHA-256")
 def _(world):
-    for result in (world.host_first, world.host_second):
-        saved = s1("build").load_provenance(Path(result.provenance.build_root))
+    roots = [Path(r.provenance.build_root) for r in (world.host_first, world.host_second)]
+    assert roots[0] != roots[1], "both builds wrote to the same place"
+    for root in roots:
+        saved = s1("build").load_provenance(root)
         for field in ("commit", "dependencies", "commands", "executable", "sha256"):
             assert getattr(saved, field), field
+        assert Path(saved.executable).resolve().is_relative_to(root.resolve())
         assert saved.sha256 == hashlib.sha256(Path(saved.executable).read_bytes()).hexdigest()
 
 
 @then("neither build tree is inside version control")
 def _(world):
     for result in (world.host_first, world.host_second):
-        assert not Path(result.provenance.build_dir).resolve().is_relative_to(REPO.resolve())
-        assert not Path(result.provenance.build_dir).resolve().is_relative_to(PROJECT.resolve())
+        for d in (result.provenance.build_dir, result.provenance.source_dir):
+            assert not Path(d).resolve().is_relative_to(REPO.resolve())
+            assert not Path(d).resolve().is_relative_to(PROJECT.resolve())

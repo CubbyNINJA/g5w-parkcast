@@ -7,20 +7,22 @@ import re
 from pytest_bdd import given, parsers, then, when
 
 from steps.fakes import s1
-from steps.world import (ACCEPT, ARRIVE, AUDIO_ONLY, BANNER, CODEC_H264, CONNECT, FEATURES, HEVC_REFUSAL, SESSION,
-                         SETUP, analyse, judge, log_line, sessions_excerpt, wrap, write_log)
+from steps.world import (ACCEPT, ARRIVE, AUDIO_ONLY, BANNER, CODEC_H264, CONNECT, DECISIVE, FEATURES, SESSION, SETUP,
+                         WRAP_OFFSET, analyse, judge, log_line, sessions_excerpt, wrap, write_log)
 
 Q = r'"(?P<{}>[^"]*)"'
 N = r"(?P<{}>\d+)"
 VERDICT = r"(?P<{}>GO|NO-GO|INCONCLUSIVE)"
 
+# Each one-session fixture, with the excerpt lines its verdict must cite.
 ONE_SESSION = {
-    "H.264 mirroring started": SESSION["GO"],
-    "the iPhone requested HEVC": SESSION["NO-GO"],
-    "no video stream arrived": [CONNECT],
-    "only mirroring setup and the connection were logged": [CONNECT, SETUP, ACCEPT],
-    "the iPhone requested HEVC and then H.264 mirroring started": [*SESSION["NO-GO"], ARRIVE, CODEC_H264],
-    "a video stream arrived and no codec line followed": SESSION["INCONCLUSIVE"],
+    "H.264 mirroring started": (SESSION["GO"], [5]),
+    "the iPhone requested HEVC": (SESSION["NO-GO"], [5]),
+    "no video stream arrived": ([CONNECT], [1]),
+    "only mirroring setup and the connection were logged": ([CONNECT, SETUP, ACCEPT], [1]),
+    "only audio played": ([CONNECT, AUDIO_ONLY], [1]),
+    "the iPhone requested HEVC and then H.264 mirroring started": ([*SESSION["NO-GO"], ARRIVE, CODEC_H264], [5, 9]),
+    "a video stream arrived and no codec line followed": (SESSION["INCONCLUSIVE"], [4]),
 }
 WHOLE_LOG = {
     "no iPhone ever connected": [],
@@ -71,6 +73,7 @@ DAMAGE = {
     "a log without the runner's end marker": "no end",
     "a log whose last line has no newline": "no newline",
     "a log with neither the banner nor the end marker": "no banner, no end",
+    "a log with neither the start marker nor the end marker": "no start, no end",
 }
 
 
@@ -83,7 +86,10 @@ def damaged(w, kind, lines: list[str]):
         w.log = path
         return
     if kind == "utf8":
-        write_log(w, text.encode("utf-8").replace(CONNECT.encode(), CONNECT.encode() + b" \xff\xfe"))
+        # An unreadable line of its own, after the session and before the end marker, so the
+        # session's own lines stay intact.
+        head, end = text.rstrip("\n").rsplit("\n", 1)
+        write_log(w, head.encode("utf-8") + b"\n\xff\xfe unreadable bytes\n" + end.encode("utf-8") + b"\n")
         return
     if "no start" in kind:
         rows = rows[1:]
@@ -177,6 +183,16 @@ def _(world, n):
     _obs_at(_session(world).hevc_request, int(n), world)
 
 
+@then(parsers.re("an HEVC stream is observed at line " + N.format("n")))
+def _(world, n):
+    _obs_at(_session(world).hevc_stream, int(n), world)
+
+
+@then("the audio format is unknown")
+def _(world):
+    assert _session(world).audio_format is None
+
+
 @then("no HEVC stream is observed")
 def _(world):
     assert _session(world).hevc_stream is None
@@ -232,7 +248,9 @@ def _(world, limitation):
 
 @given(parsers.re("a complete log with one session in which (?P<what>.+)"))
 def _(world, what):
-    write_log(world, wrap(ONE_SESSION[what]))
+    lines, cites = ONE_SESSION[what]
+    world.required_cites = [log_line(world, n) for n in cites]
+    write_log(world, wrap(lines))
 
 
 @given(parsers.re("a complete log in which (?P<what>.+)"))
@@ -240,7 +258,7 @@ def _(world, what):
     write_log(world, wrap(WHOLE_LOG[what]))
 
 
-@given(parsers.re("an error-free run with complete sessions whose verdicts are (?P<sessions>.+)"))
+@given(parsers.re("a run with a complete readable log whose sessions have verdicts (?P<sessions>.+)"))
 def _(world, sessions):
     world.expected = [v.strip() for v in sessions.split(",")]
     write_log(world, wrap(sessions_excerpt(world.expected)))
@@ -249,10 +267,16 @@ def _(world, sessions):
 @given(parsers.re("a run containing a complete session whose verdict is " + VERDICT.format("verdict")))
 def _(world, verdict):
     world.session_lines = SESSION[verdict]
+    world.session_verdict = verdict
 
 
 @given(parsers.re("the log as a whole is (?P<damage>truncated|partly unreadable)"))
 def _(world, damage):
+    # First prove the undamaged log really gives that session the stated verdict.
+    write_log(world, wrap(world.session_lines), name="clean.log")
+    clean = s1("evaluator").judge(s1("analyser").analyse(world.log), notes={}, ended_at=None, end_reason=None)
+    assert [s.verdict for s in clean.sessions] == [world.session_verdict]
+    world.report = None
     damaged(world, "no end" if damage == "truncated" else "utf8", world.session_lines)
 
 
@@ -290,6 +314,8 @@ def _(world, verdict, reason):
 def _(world, verdict, reason):
     j = _judgement(world)
     assert (j.verdict, j.reason) == (verdict, reason)
+    if reason == "evidence error":
+        _no_fabricated_cites(world, j.cites)
 
 
 @then(parsers.re("the run's verdict is " + VERDICT.format("verdict")))
@@ -302,13 +328,29 @@ def _(world):
     assert _judgement(world).verdict != "GO"
 
 
+def _span(world, i: int) -> range:
+    """The log lines that belong to session i (1-based): from its start to the next session's start."""
+    sessions = analyse(world).sessions
+    end = sessions[i].start_line if i < len(sessions) else len(_lines(world))
+    return range(sessions[i - 1].start_line, end + (0 if i < len(sessions) else 1))
+
+
+def _no_fabricated_cites(world, cites) -> None:
+    raw = world.log.read_bytes().split(b"\n")
+    for n in cites:
+        assert 1 <= n <= len(raw), f"line {n} doesn't exist"
+        raw[n - 1].decode("utf-8")  # a cited line must be readable
+
+
 @then("the verdict cites the log lines it rests on")
 def _(world):
-    j, report = _judgement(world), analyse(world)
-    for sv, s in zip(j.sessions, report.sessions):
-        assert sv.cites, "no lines cited"
-        observed = {o.line for o in (s.connection, s.arrived, s.started, s.codec, s.hevc_request) if o is not None}
-        assert set(sv.cites) <= observed, (sv.cites, observed)
+    j = _judgement(world)
+    assert len(j.sessions) == 1
+    cites = j.sessions[0].cites
+    for n in world.required_cites:
+        assert n in cites, f"the deciding line {n} isn't cited ({cites})"
+    assert set(cites) <= set(_span(world, 1)), cites
+    assert set(j.cites) <= set(cites) and j.cites, "the run verdict must cite the lines its session rests on"
 
 
 @then("the reason notes the earlier HEVC request")
@@ -353,13 +395,13 @@ def _(world):
 @then(parsers.re("the reason states the log was read to its last line and the run ended at second " + N.format("t")))
 def _(world, t):
     j = _judgement(world)
-    assert j.examined_to_line == len(_lines(world))
+    total = len(_lines(world))
+    assert j.examined_to_line == total
     assert j.endpoint == int(t)
-    assert str(t) in j.sessions[0].reason
+    reason = j.sessions[0].reason
+    assert re.search(rf"\bline {total}\b", reason) and re.search(rf"\bsecond {t}\b", reason), reason
 
 
-@then("the verdict cites no line as showing a video stream")
+@then("the verdict cites only the connection line, not the setup lines")
 def _(world):
-    rows = _lines(world)
-    video = {i for i, r in enumerate(rows, 1) if "width_source" in r or "codec is" in r}
-    assert not set(_judgement(world).sessions[0].cites) & video
+    assert _judgement(world).sessions[0].cites == [log_line(world, 1)]

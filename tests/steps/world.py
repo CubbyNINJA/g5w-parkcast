@@ -1,9 +1,13 @@
 """Shared state and helpers for the S1 step definitions.
 
-`world` holds one scenario's fakes and results. Paths written in the scenarios under
-C:\\uxplay-s1\\ map into the scenario's temporary directory. Log excerpts are wrapped into
-complete logs as specs/README.md ("Log excerpts") says: start marker and banner before, end
-marker and final newline after, so excerpt line N is log line N + 2.
+`world` holds one scenario's fakes and results. When steps say what to do; when one of them
+needs the runner, it sets `world.pending`, and the action runs exactly once, after the last When
+and before the first Then (pytest_bdd_before_step below). Then steps only read results; they
+never start an action themselves.
+
+Paths written in the scenarios under C:\\uxplay-s1\\ map into the scenario's temporary directory.
+Log excerpts are wrapped into complete logs as specs/README.md ("Log excerpts") says: start
+marker and banner before, end marker and final newline after, so excerpt line N is log line N + 2.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from steps.fakes import (Events, FakeClock, FakeCompiler, FakeFirewall, FakeLaun
 
 PROJECT = Path(__file__).resolve().parents[2]
 REPO = PROJECT.parents[1]
-BANNER = "UxPlay 1.74: An Open-Source AirPlay mirroring and audio-streaming server."
+BANNER = FakeLauncher.BANNER
 WRAP_OFFSET = 2
 FIXTURE_ROOT = "C:\\uxplay-s1\\"
 COMMIT = "05b0275cb1b726592700e47a6e0307544b3d3a52"
@@ -46,6 +50,13 @@ SESSION = {
     "NO-GO": [CONNECT, SETUP, ACCEPT, ARRIVE, *HEVC_REFUSAL],
     "INCONCLUSIVE": [CONNECT, SETUP, ACCEPT, ARRIVE],
 }
+# The excerpt line each session's verdict must cite (1-based within SESSION[v]).
+DECISIVE = {"GO": 5, "NO-GO": 5, "INCONCLUSIVE": 4}
+
+# The launch command S1 specifies (03_runner.feature, AIR-006), written out here so the steps
+# don't take their expectation from the code under test.
+EXPECTED_FLAGS = [("-n", "HU-Test"), ("-nh",), ("-s", "1920x720@60"), ("-d",)]
+FORBIDDEN_FLAGS = {"-h265", "-vdmp", "-admp", "-vrtp", "-artp"}
 
 
 @pytest.fixture
@@ -59,11 +70,21 @@ def world(tmp_path, monkeypatch):
         work_root=tmp_path / "uxplay-s1", runs_root=tmp_path / "runs", cwd=tmp_path / "cwd",
         build_root=tmp_path / "uxplay-s1", provenance=None, record=None, interrupted=False,
         log=None, report=None, judgement=None, notes={}, end=None, command=None, ios=None,
-        planned=False, block_log=False, unrelated=None,
+        pending=None, executed=False, unrelated=None, run_error=None,
     )
     w.cwd.mkdir()
     monkeypatch.chdir(w.cwd)
     return w
+
+
+def pytest_bdd_before_step(request, feature, scenario, step, step_func):
+    """Run the scenario's pending action once, after its When steps and before its first Then."""
+    if step.type != "then" or "world" not in request.fixturenames:
+        return
+    w = request.getfixturevalue("world")
+    if w.pending is not None and not w.executed:
+        w.executed = True
+        w.pending(w)
 
 
 def host_path(w, written: str) -> Path:
@@ -92,22 +113,25 @@ def run_dir(w) -> Path:
     return w.runs_root / "fixture-run"
 
 
-def run(w):
-    """Run the runner once, with whatever the scenario's Given and When steps set up."""
-    if w.record is not None or w.interrupted:
-        return w.record
+def execute_run(w) -> None:
+    """Run the runner once with whatever the scenario's Given and When steps set up."""
     if w.provenance is None:
         make_verified_build(w)
-    rd = run_dir(w)
-    if w.block_log:
-        rd.mkdir(parents=True, exist_ok=True)
-        (rd / "uxplay.log").mkdir()
     try:
-        w.record = s1("runner").run(w.provenance, rd, firewall=w.firewall, launcher=w.launcher,
+        w.record = s1("runner").run(w.provenance, run_dir(w), firewall=w.firewall, launcher=w.launcher,
                                     clock=w.clock, owner=w.owner, timeout=600)
     except KeyboardInterrupt:
         w.interrupted = True
-        w.record = None
+
+
+def plan_run(w) -> None:
+    w.pending = execute_run
+
+
+def rec(w):
+    """The run record. Fails if the scenario never ran the runner or the runner returned nothing."""
+    assert w.executed, "no When step ran the runner"
+    assert w.record is not None, "the runner returned no record"
     return w.record
 
 
@@ -157,15 +181,14 @@ def read_json(path: Path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def snapshot(*roots: Path) -> dict[str, tuple[int, int]]:
-    """Every file under the roots with its size and modification time."""
+def snapshot(*roots: Path) -> dict[str, str]:
+    """Every file and folder under the roots, with each file's SHA-256, so content changes show."""
     out = {}
     for root in roots:
         if root.exists():
             for p in sorted(root.rglob("*")):
                 if p.is_file():
-                    st = p.stat()
-                    out[str(p)] = (st.st_size, st.st_mtime_ns)
+                    out[str(p)] = hashlib.sha256(p.read_bytes()).hexdigest()
                 elif p.is_dir():
-                    out[str(p) + "/"] = (0, 0)
+                    out[str(p) + "/"] = "dir"
     return out

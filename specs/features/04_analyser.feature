@@ -40,6 +40,7 @@ Feature: The analyser reads what UxPlay actually logged
     And mirroring video started is not observed
     And the video codec is unknown
     And the stream resolution is unknown
+    And the audio format is unknown
 
   @offline @normal @AIR-008 @AIR-029 @AT-08 @AT-29
   Scenario: An HEVC request is told apart from an HEVC stream
@@ -59,6 +60,19 @@ Feature: The analyser reads what UxPlay actually logged
     And no HEVC stream is observed
     And mirroring video started is not observed
     And the video codec is unknown
+
+  @offline @normal @AIR-008 @AIR-009 @AIR-029 @AT-08 @AT-09 @AT-29
+  Scenario: A prefixed codec message identifies an observed HEVC stream
+    Given a UxPlay log excerpt with these lines:
+      """
+      [fixture] connection request from Fixture iPhone (iPhone17,1) with deviceID = AA:BB:CC:DD:EE:FF
+      [fixture] *** codec is h265: geometry is (w,h)=(1920,886) (source); (x,y)=(0,0); (w,h)=(1920,886)
+      """
+    When the analyser reads the log
+    Then mirroring video started is observed at line 2
+    And the video codec is "HEVC", observed at line 2
+    And an HEVC stream is observed at line 2
+    And the audio format is unknown
 
   @offline @normal @AIR-008 @AT-08
   Scenario: The advertised display size is never reported as the stream size
@@ -135,3 +149,4 @@ Feature: The analyser reads what UxPlay actually logged
       | a log without the runner's end marker            | truncated       |
       | a log whose last line has no newline             | truncated       |
       | a log with neither the banner nor the end marker | no UxPlay banner |
+      | a log with neither the start marker nor the end marker | no start marker |

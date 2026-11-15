@@ -44,9 +44,10 @@ Feature: One command, with predictable exits and no side effects on bad input
     And no firewall rule changes and UxPlay is never launched
 
     Examples:
-      | state      |
-      | missing    |
-      | unreadable |
+      | state                |
+      | missing              |
+      | unreadable           |
+      | not valid provenance |
 
   @offline @failure @AIR-031 @AT-31
   Scenario Outline: An output location that can't be written fails before anything starts
@@ -61,6 +62,13 @@ Feature: One command, with predictable exits and no side effects on bad input
       | the runs folder    | run                              |
       | the report path    | analyse fixture.log -o report.json |
       | the verdict path   | evaluate fixture-run             |
+
+  @offline @normal @AIR-031 @AT-31
+  Scenario: The documented script is the command's entry point
+    When this project's interpreter runs "tools/s1.py --help" as a subprocess
+    Then the subprocess exits with code 0
+    And its output names the commands check, build, run, analyse, evaluate and summary
+    And no file in the project is created or changed
 
   @offline @boundary @AIR-031 @AT-31
   Scenario: A NO-GO verdict is a completed command, not a failure

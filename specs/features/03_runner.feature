@@ -61,16 +61,28 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     Then the run reports that UxPlay failed to start, with exit code 1
     And cleanup runs
 
-  @offline @failure @AIR-006 @AIR-005 @AT-06 @AT-05
-  Scenario: A log that can't be captured stops the run before it counts as started
-    Given the verified build and a newly created temporary firewall rule
-    And diagnostic log capture can't be established
+  @offline @failure @AIR-006 @AIR-005 @AT-06 @AT-05 @OD-29
+  Scenario: UxPlay's output that can't be captured after the rule exists stops the run and cleans up
+    Given the verified build and writable run outputs
+    And UxPlay starts but its output can't be attached to the run's log
     When the runner attempts to launch the receiver
-    Then the run reports the diagnostic capture failure
+    Then the run created its firewall rule before the capture failed
+    And the run reports the diagnostic capture failure
     And no UxPlay process launched by the run remains running
     And the temporary firewall rule is removed
     And its removal is verified
     And the run is not reported as successfully started
+
+  @offline @failure @AIR-006 @AIR-005 @AT-06 @AT-05 @OD-29
+  Scenario: A process that can't be created after the rule exists is reported and cleaned up
+    Given the verified build and writable run outputs
+    And creating the UxPlay process raises an operating-system error
+    When the runner attempts to launch the receiver
+    Then the run reports the process-creation error
+    And the run is not reported as successfully started
+    And no UxPlay process launched by the run remains running
+    And the temporary firewall rule is removed
+    And its removal is verified
 
   @offline @normal @AIR-007 @AT-07
   Scenario: The runner tells the owner exactly what to do on the iPhone
@@ -112,7 +124,7 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     And the log's last line is the runner's end marker naming "owner ended"
     And the run records the deadline at second 600 and the end at second 120
 
-  @offline @failure @AIR-007 @AT-07
+  @offline @failure @AIR-007 @AIR-005 @AT-07 @AT-05
   Scenario: A UxPlay process that won't stop is reported
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And the UxPlay process ignores the stop request

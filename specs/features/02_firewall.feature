@@ -25,6 +25,15 @@ Feature: A temporary firewall rule for uxplay.exe only
     And no new rule is created
     And UxPlay is never launched
 
+  @offline @failure @AIR-003 @AIR-030 @AT-03 @AT-30 @OD-27
+  Scenario: A removal that reports success but leaves the rule in place stops the run before launch
+    Given the firewall holds 1 owned rule left by an earlier run
+    And removing a rule reports success but leaves it in the next listing
+    When a test run starts
+    Then the run stops naming the remaining rule "NEMESIS-AirPlay-S1" and its program
+    And no new rule is created
+    And UxPlay is never launched
+
   @offline @failure @AIR-030 @AT-30 @OD-27
   Scenario: A rule with the runner's name but another program is reported and left alone
     Given the firewall holds a rule named "NEMESIS-AirPlay-S1" for the program "C:\Tools\other.exe"

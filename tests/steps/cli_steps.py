@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import io
+import subprocess
+import sys
+from pathlib import Path
 
 from pytest_bdd import given, parsers, then, when
 
 from steps.fakes import s1
-from steps.world import SESSION, make_verified_build, read_json, snapshot, wrap
+from steps.world import PROJECT, SESSION, make_verified_build, read_json, snapshot, wrap
 
 Q = r'"(?P<{}>[^"]*)"'
 MUTATING = ("build.checkout", "build.compile", "fw.create", "fw.remove", "proc.start")
@@ -78,11 +81,13 @@ def _(world):
     assert not world.events.of("fw.create", "fw.remove", "proc.start"), world.events
 
 
-@given(parsers.re("the build provenance file is (?P<state>missing|unreadable)"))
+@given(parsers.re("the build provenance file is (?P<state>missing|unreadable|not valid provenance)"))
 def _(world, state):
     world.work_root.mkdir(parents=True, exist_ok=True)
     world.provenance_file = world.work_root / "provenance.json"
     if state == "unreadable":
+        world.provenance_file.mkdir()  # exists, but reading it as a file fails
+    elif state == "not valid provenance":
         world.provenance_file.write_text("{ not json", encoding="utf-8")
 
 
@@ -117,8 +122,40 @@ def _(world):
 
 @then("no partial output file is left behind")
 def _(world):
-    new = set(world.after) - set(world.before)
-    assert not new, new
+    added = set(world.after) - set(world.before)
+    changed = {k for k in world.before if world.after.get(k) != world.before[k]}
+    assert not added and not changed, (added, changed)
+
+
+def _project_files() -> dict[str, str]:
+    skip = {".venv", ".astra", "runs", "__pycache__", ".pytest_cache"}
+    return {k: v for k, v in snapshot(PROJECT).items()
+            if not set(Path(k).relative_to(PROJECT).parts) & skip}
+
+
+@when(parsers.re("this project's interpreter runs " + Q.format("command") + " as a subprocess"))
+def _(world, command):
+    world.before = _project_files()
+    venv = PROJECT / ".venv" / "Scripts" / "python.exe"
+    world.proc = subprocess.run([str(venv if venv.is_file() else sys.executable), *command.split()], cwd=PROJECT, capture_output=True, text=True,
+                                timeout=120)
+    world.after = _project_files()
+
+
+@then(parsers.re(r"the subprocess exits with code (?P<code>\d+)"))
+def _(world, code):
+    assert world.proc.returncode == int(code), world.proc.stdout + world.proc.stderr
+
+
+@then("its output names the commands check, build, run, analyse, evaluate and summary")
+def _(world):
+    for command in ("check", "build", "run", "analyse", "evaluate", "summary"):
+        assert command in world.proc.stdout, command
+
+
+@then("no file in the project is created or changed")
+def _(world):
+    assert world.after == world.before
 
 
 @given("a fixture run whose evidence makes its verdict NO-GO")

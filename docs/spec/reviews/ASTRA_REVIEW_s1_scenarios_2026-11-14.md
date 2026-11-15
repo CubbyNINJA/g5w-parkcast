@@ -241,3 +241,5 @@ as follows. No second review was run.
 
 The ownership test in AIR-030 and the command surface in AIR-031 are parent proposals, not owner
 decisions. The result is 68 scenario declarations in 8 feature files.
+
+Follow-up (2026-11-14): the owner approved both proposals. AIR-030's ownership test is OD-27, and AIR-031's command surface is OD-28, clarified by OD-29. They are no longer parent proposals.

@@ -1,9 +1,11 @@
 # Slice S1: the interfaces the step definitions expect
 
 The S1 implementation lives in `tools/airplay_s1/`, and `tools/s1.py` is its command (AIR-031,
-OD-28). This page lists what `tests/steps/` calls, so step 7 builds to the tests rather than the
-other way round. The steps are the authority: if this page and a step disagree, the step wins
-and this page is corrected.
+OD-28, OD-29). This page lists what `tests/steps/` calls, so step 7 builds to the tests.
+
+Owner decisions and reviewed requirements govern behaviour. Reviewed scenarios express that
+behaviour; step definitions verify it. A disagreement among these sources is resolved through
+the specification review process before implementation continues.
 
 Every backend the runner and the build touch is passed in. Offline scenarios pass the fakes in
 `tests/steps/fakes.py`; `@host` and `@pc` scenarios pass the real ones named below.
@@ -26,6 +28,8 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
   - If master's version isn't 1.74, it asks `owner.ask()` naming the version and stops.
   - It removes any saved provenance before compiling, so a failed or interrupted build leaves
     nothing selectable.
+  - It catches a keyboard interrupt during the compile and returns `status="interrupted"` with
+    an `error` that says so.
 - `Provenance` (a dataclass) has `commit`, `version`, `build_root`, `source_dir`, `build_dir`,
   `executable`, `sha256`, `dependencies` and `commands`.
 - `save_provenance(prov, work_root)`, `load_provenance(work_root)` (raises `ProvenanceError`),
@@ -34,8 +38,9 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
 - `BuildError`, and `DEFAULT_WORK_ROOT` (outside the repository).
 - The upstream backend has `master_commit()`, `version_at(commit)` and `checkout(commit, dest)`.
   The compiler backend has `compile(source_dir, build_dir) -> exe` and `commands`.
-- `HostBuild()` is the real thing for `@host`. It has `check_and_save()` and
-  `build_clean(pinned=None)`.
+- `HostBuild()` is the real thing for `@host`. It has `check_and_save(dest)`, which writes
+  `dest/inventory.json` (`ucrt64`, `packages`, `gst_elements`), and `build_clean(dest, pinned=None)`,
+  which builds into a new `dest` and saves that build's provenance there, with `build_root=dest`.
 
 ## `firewall`
 
@@ -53,23 +58,28 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
 
 ## `runner`
 
-- `run(provenance, run_dir, firewall, launcher, clock, owner, timeout=600) -> RunRecord`. The
-  order is:
-  1. Verify the hash.
-  2. Remove stale owned rules and verify the removal; stop on a foreign same-named rule.
-  3. Create the rule.
-  4. Open the log and write the start marker.
-  5. Launch.
-  6. Tell the owner what to do.
-  7. Wait until the owner ends the test, UxPlay exits, or the deadline passes.
-  8. Stop UxPlay.
-  9. Write the end marker.
-  10. Remove the rule and verify the removal.
+- `run(provenance, run_dir, firewall, launcher, clock, owner, timeout=600) -> RunRecord`.
+  - **Preflight (OD-29):** validate the provenance and the hash, and check that the run's output
+    locations can be written, before any firewall change.
+  - Remove stale owned rules, then confirm with a fresh listing that they're gone. A removal
+    that reports success but leaves the rule in that listing stops the run, as does a foreign
+    rule with the same name.
+  - Create the rule, open the log, write the start marker, and launch.
+  - If process creation raises, or capture fails after the rule exists (`CaptureError`, which
+    carries the started `proc`), report it, stop any launched process, and remove the rule and
+    verify its removal.
+  - Otherwise tell the owner what to do, and wait until the owner ends the test, UxPlay exits,
+    or the deadline passes.
+  - Stop UxPlay and wait for it to exit. Only after it has exited, write the end marker, then
+    remove the rule and verify its removal with a fresh listing.
 - It saves `run.json` and `firewall-before.json`, `firewall-during.json` and
   `firewall-after.json` in `run_dir`.
 - `RunRecord` has `started`, `command`, `launched_at`, `deadline`, `ended_at`, `reason`,
   `exit_code`, `errors`, `rule`, `cleanup_ran`, `cleanup_clean`, `residual_rule`,
-  `residual_pid` and `to_dict()`.
+  `residual_pid`, `pid` and `to_dict()`. `run.json` holds `to_dict()`; the CLI's `run` command
+  adds `tier: "pc"`.
+- `launched_at` is the clock time when the process started, and `ended_at` is when the run
+  decided to end. Errors name the rule, its program, or the process ID they concern.
 - `reason` is one of `owner ended`, `timeout`, `failed to start`, `uxplay exited`,
   `interrupted`, `capture failed` or `refused`.
 - `build_command(executable)` gives `[exe, -n, HU-Test, -nh, -s, 1920x720@60, -d]`, in any
@@ -96,9 +106,15 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
 ## `evaluator`
 
 - `judge(report, notes, ended_at, end_reason) -> Judgement`.
-- `Judgement` has `verdict`, `reason`, `limitation`, `sessions`, `notes`, `examined_to_line`,
-  `endpoint` and `to_dict()`.
-- Each session verdict has `verdict`, `reason`, `limitation` and `cites` (log line numbers).
+- `Judgement` has `verdict`, `reason`, `limitation`, `cites`, `sessions`, `notes`,
+  `examined_to_line`, `endpoint` and `to_dict()`.
+  - The run's `cites` are the lines its deciding sessions rest on.
+  - An evidence error never cites a line that doesn't exist or can't be read.
+- Each session verdict has `verdict`, `reason`, `limitation` and `cites` (log line numbers
+  inside that session).
+  - GO cites the codec line, and an HEVC NO-GO cites the refusal line.
+  - A verdict that rests on something missing cites the connection line, and its reason says
+    `read to line <N>` and `ended at second <T>`.
 
 ## `evidence`
 
@@ -110,8 +126,9 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
   `incomplete`.
 - `summary(run_dir, tier) -> str` and `write_summary(dest_dir, run_dir, tier) -> Path`.
   - Summaries never contain client names, deviceIDs or addresses.
-  - They name the tier and say the head unit is untested.
-  - An offline summary says it is not evidence about an iPhone.
+  - They name the tier (`Tier: <tier>`) and say the head unit is untested.
+  - An offline summary calls itself a synthetic fixture result that is not evidence about an
+    iPhone, and makes no compatibility claim.
 - `screen_content(dirs)` lists video, image and stream-dump files. `latest_run(runs_root)`
   returns the newest run folder.
 

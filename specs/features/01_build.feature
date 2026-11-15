@@ -58,7 +58,7 @@ Feature: A checked, pinned UxPlay build on this PC
 
   @offline @failure @AIR-002 @AT-02
   Scenario Outline: An interrupted build can't supply a verified executable
-    Given a build that has written a partial executable
+    Given a compiler that writes a partial executable before it stops
     When the build ends by <ending>
     Then the failure is reported
     And the partial executable is not recorded as a successful build output
@@ -68,6 +68,16 @@ Feature: A checked, pinned UxPlay build on this PC
       | ending               |
       | a compiler failure   |
       | a keyboard interrupt |
+
+  @offline @failure @AIR-002 @AT-02
+  Scenario: A failed rebuild leaves the old executable intact but unusable
+    Given an executable left by an earlier build in the build tree
+    And the compiler will fail before changing any output
+    When the build procedure runs
+    Then the failure is reported
+    And the earlier executable's bytes are unchanged
+    And no executable is recorded as this build's output
+    And the earlier executable is not selected for a test run
 
   @offline @failure @AIR-002 @AT-02 @OD-20
   Scenario: master that is no longer UxPlay 1.74 stops the build and asks the owner

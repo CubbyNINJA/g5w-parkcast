@@ -78,14 +78,25 @@ Feature: What the run keeps, what it publishes, and what it claims
   Scenario: The live test: the owner's iPhone mirrors to HU-Test
     Given the verified build and this PC's network
     And the owner's iPhone on iOS 27 on the same network
-    When the runner launches "HU-Test" and the owner starts Screen Mirroring to it
-    And the owner ends the test
-    Then the live run's folder under "runs/" holds the log, the analyser report, every session verdict and the run verdict
+    When the runner launches "HU-Test", the owner starts Screen Mirroring to it and then ends the test at the console
+    Then the command completed and created exactly one new run folder under "runs/"
+    And the live run's folder under "runs/" holds the log, the analyser report, every session verdict and the run verdict
     And the recorded launch command is the one the offline launch scenarios specify
     And the run records the launch time, the deadline 600 seconds later, the end time and the reason "owner ended"
     And no UxPlay process launched by the run is still running
     And no rule the runner owns remains in the firewall
     And the log starts with the runner's start marker and ends with its end marker and a newline
+    And the owner's sound note and the iOS version with its build, marked "owner-entered", are recorded
+    And the live run's folder, the build tree and the working directory hold no video, image or stream dump file
+
+  @pc @boundary @AIR-007 @AIR-011 @AIR-012 @AIR-013 @AT-07 @AT-11 @AT-12 @AT-13 @OD-08
+  Scenario: A live run reaches the 10-minute timeout
+    Given the verified build and this PC's network
+    And the owner's iPhone on iOS 27 on the same network
+    When the runner launches "HU-Test", the owner starts Screen Mirroring to it and leaves it until the timeout
+    Then the command completed and created exactly one new run folder under "runs/"
+    And the run records the launch time, the deadline 600 seconds later, the end time and the reason "timeout"
+    And no UxPlay process launched by the run is still running
     And the owner's sound note and the iOS version with its build, marked "owner-entered", are recorded
     And the live run's folder, the build tree and the working directory hold no video, image or stream dump file
 
