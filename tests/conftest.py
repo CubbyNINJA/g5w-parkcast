@@ -32,7 +32,17 @@ def pytest_addoption(parser):
                      help="also run @pc scenarios (this PC's UxPlay build and the owner's iPhone)")
 
 
+def _elevated() -> bool:
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except (AttributeError, OSError):
+        return False
+
+
 def pytest_collection_modifyitems(config, items):
+    if (config.getoption("--run-host") or config.getoption("--run-pc")) and not _elevated():
+        pytest.exit("--run-host and --run-pc need an elevated terminal (AGENTS.md)", returncode=4)
     for item in items:
         tags = {m.name for m in item.iter_markers()}
         if "unit" in tags:

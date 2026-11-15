@@ -263,8 +263,9 @@ def _(world, sessions):
     world.expected = [v.strip() for v in sessions.split(",")]
     excerpt = sessions_excerpt(world.expected)
     # Each session's deciding line, worked out from the fixture: sessions are separated by one LOST line.
-    world.decisive, start = [], 1
+    world.decisive, world.starts, start = [], [], 1
     for v in world.expected:
+        world.starts.append(log_line(world, start))
         world.decisive.append(log_line(world, start + DECISIVE[v] - 1))
         start += len(SESSION[v]) + 1
     write_log(world, wrap(excerpt))
@@ -335,10 +336,12 @@ def _(world):
 
 
 def _span(world, i: int) -> range:
-    """The log lines that belong to session i (1-based): from its start to the next session's start."""
-    sessions = analyse(world).sessions
-    end = sessions[i].start_line if i < len(sessions) else len(_lines(world))
-    return range(sessions[i - 1].start_line, end + (0 if i < len(sessions) else 1))
+    """The log lines that belong to session i (1-based), from the fixture's own session starts when
+    the Given recorded them, else from the start of the excerpt; never from the analyser."""
+    starts = getattr(world, "starts", None) or [log_line(world, 1)]
+    last = len(_lines(world)) - 1  # the end marker belongs to no session
+    end = starts[i] if i < len(starts) else last + 1
+    return range(starts[i - 1], end)
 
 
 def _no_fabricated_cites(world, cites) -> None:
@@ -383,6 +386,7 @@ def _(world):
 def _(world):
     j = _judgement(world)
     assert [s.verdict for s in j.sessions] == world.expected
+    assert [s.start_line for s in analyse(world).sessions] == world.starts, "session boundaries differ from the fixture"
     for i, (sv, line) in enumerate(zip(j.sessions, world.decisive), 1):
         assert line in sv.cites, f"session {i} doesn't cite its deciding line {line} ({sv.cites})"
         assert set(sv.cites) <= set(_span(world, i)), (i, sv.cites)

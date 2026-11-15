@@ -292,6 +292,9 @@ def _(world):
             assert getattr(saved, field) == getattr(returned, field), field
         for field in ("commit", "dependencies", "commands"):
             assert getattr(saved, field), field
+        inventory = json.loads((world.inventory_dir / "inventory.json").read_text(encoding="utf-8"))
+        for package in s1("prereqs").REQUIRED_PACKAGES:
+            assert saved.dependencies.get(package) == inventory["packages"][package], package
         assert saved.sha256 == hashlib.sha256(Path(saved.executable).read_bytes()).hexdigest()
     assert world.host_second.provenance.commit == world.host_first.provenance.commit
 

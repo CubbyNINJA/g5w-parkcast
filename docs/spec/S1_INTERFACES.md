@@ -78,8 +78,17 @@ Every backend the runner and the build touch is passed in. Offline scenarios pas
   `exit_code`, `errors`, `rule`, `cleanup_ran`, `cleanup_clean`, `residual_rule`,
   `residual_pid`, `pid` and `to_dict()`. `run.json` holds `to_dict()`; the CLI's `run` command
   adds `tier: "pc"`.
-- `launched_at` is the clock time when the process started, and `ended_at` is when the run
-  decided to end. Errors name the rule, its program, or the process ID they concern.
+- `launched_at` is the clock time when the process started, and `ended_at` is the clock time
+  when the run decided to end, as the clock reported it (with a real clock, a timeout's
+  `ended_at` can be slightly after the deadline). Errors name the rule, its program, or the
+  process ID they concern.
+- Each `firewall-<k>.json` is a JSON list with one object per firewall rule, holding every
+  `Rule` field (`name`, `program`, `direction`, `action`, `profiles` as a list, `ports`, `id`).
+  It lists every rule, not only owned ones. `firewall-during.json` is listed after the run's
+  rule is created and before UxPlay is stopped.
+- `SubprocessLauncher` starts `uxplay.exe` directly, with no shell or wrapper process, so
+  `proc.pid` is `uxplay.exe`'s own process ID, and Windows's command line for it is
+  `subprocess.list2cmdline(argv)`.
 - `reason` is one of `owner ended`, `timeout`, `failed to start`, `uxplay exited`,
   `interrupted`, `capture failed` or `refused`.
 - `build_command(executable)` gives `[exe, -n, HU-Test, -nh, -s, 1920x720@60, -d]`, in any

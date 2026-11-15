@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import Counter
 import re
 import signal
 import subprocess
@@ -44,6 +45,7 @@ class RecordingFirewall:
         self.inner = s1("firewall").WindowsFirewall()
         self.events = events
         self.ps_during = None
+        self.ps_error = None
 
     def active_profile(self):
         return self.inner.active_profile()
@@ -56,7 +58,10 @@ class RecordingFirewall:
     def create(self, rule):
         made = self.inner.create(rule)
         self.events.add("fw.create", id=made.id, asked=rule_fields(rule))
-        self.ps_during = _powershell_rules()
+        try:
+            self.ps_during = _powershell_rules()
+        except Exception as e:  # the test's own check failed; that must not look like the runner's failure
+            self.ps_error = e
         return made
 
     def remove(self, rule_id):
@@ -89,6 +94,7 @@ class RecordingLauncher:
         self.argv = None
         self.start_time = None
         self.stop_times = []
+        self.os_procs = None
 
     def start(self, argv, log):
         self.argv = tuple(argv)
@@ -96,7 +102,30 @@ class RecordingLauncher:
         proc = self.inner.start(argv, log)
         self.procs.append(proc)
         self.events.add("proc.start", pid=proc.pid, argv=tuple(argv))
+        self.os_procs = _os_uxplay()
         return RecordedProc(proc, self)
+
+
+def _os_uxplay() -> list[dict]:
+    """Every running uxplay.exe as Windows lists it: process ID, executable path and command line."""
+    script = ("Get-CimInstance Win32_Process -Filter \"Name='uxplay.exe'\" | "
+              "Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress")
+    res = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, encoding="utf-8-sig",
+                         timeout=120)
+    assert res.returncode == 0, res.stderr
+    rows = json.loads(res.stdout) if res.stdout.strip() else []
+    return rows if isinstance(rows, list) else [rows]
+
+
+def _launched_os_row(world) -> dict:
+    """The one Windows process that is this build's uxplay.exe, and that has the launcher's PID."""
+    launcher = world.real_launcher
+    assert launcher.procs, "the test saw no UxPlay launch"
+    exe = world.provenance.executable.lower()
+    rows = [r for r in launcher.os_procs or [] if (r.get("ExecutablePath") or "").lower() == exe]
+    assert len(rows) == 1, f"expected one running {exe} just after launch, Windows listed {launcher.os_procs}"
+    assert rows[0]["ProcessId"] == launcher.procs[0].pid, "the launcher's PID isn't uxplay.exe's own"
+    return rows[0]
 
 
 SNAPSHOT_PS1 = Path(__file__).with_name("firewall_snapshot.ps1")
@@ -106,7 +135,8 @@ def _powershell_rules() -> list[dict]:
     """Every firewall rule, with its program and port filters, as Windows itself lists it."""
     out = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SNAPSHOT_PS1)],
                          capture_output=True, encoding="utf-8-sig", check=True, timeout=600).stdout
-    rows = json.loads(out) if out.strip() else []
+    assert out.strip(), "firewall_snapshot.ps1 listed no rules"
+    rows = json.loads(out)
     return [{k: str(v) for k, v in r.items()} for r in (rows if isinstance(rows, list) else [rows])]
 
 
@@ -132,10 +162,9 @@ def _saved_mine(rows: list[dict], build_root) -> list[tuple]:
     """The runner's saved rules in the same form, so the two views can be compared field by field."""
     direction = {"in": "Inbound", "out": "Outbound"}
     action = {"allow": "Allow", "block": "Block"}
-    fw = s1("firewall")
     out = []
     for r in rows:
-        if fw.is_owned(fw.Rule(**r), build_root):
+        if _ps_owned({"DisplayName": r["name"], "Program": r["program"]}, build_root):
             ports = "Any/Any" if r["ports"] is None else str(r["ports"])
             out.append((r["name"], r["program"].lower(), direction[r["direction"]], action[r["action"]],
                         ", ".join(r["profiles"]), ports))
@@ -189,7 +218,7 @@ def _(world):
             seen["at"] = now
         elif procs and now - seen["at"] >= 3 and "killed" not in seen:
             seen["killed"] = True
-            os.kill(procs[0].pid, signal.SIGTERM)
+            os.kill(_launched_os_row(world)["ProcessId"], signal.SIGTERM)
         if "killed" in seen and now - seen["at"] > 60:
             owner.end_at = now  # safety net: never leave the receiver running if the runner misses the exit
     owner.on_poll = poll
@@ -201,10 +230,13 @@ def _(world):
 def _(world):
     saved = {k: read_json(world.saved_dir / f"firewall-{k}.json") for k in ("before", "during", "after")}
     windows = {"before": world.ps_before, "during": world.real_fw.ps_during, "after": world.ps_after}
+    assert world.real_fw.ps_error is None, f"the test's own firewall check failed: {world.real_fw.ps_error}"
     assert windows["during"] is not None, "the run's rule was never created"
     for k in saved:
         assert _saved_mine(saved[k], world.build_root) == _ps_mine(windows[k], world.build_root), \
             f"firewall-{k}.json doesn't match Windows's own rules at that point"
+        assert Counter(r["name"] for r in saved[k]) == Counter(w["DisplayName"] for w in windows[k]), \
+            f"firewall-{k}.json doesn't list every rule Windows had at that point"
     world.saved_lists = saved
 
 
@@ -215,6 +247,9 @@ def _(world):
     assert 0 <= removed < created
     checks = [e for e in world.events[removed + 1:created] if e["kind"] == "fw.list"]
     assert checks and world.leftover.id not in checks[-1]["ids"]
+    leftover = world.leftover.program.lower()
+    assert leftover in [m[1] for m in _ps_mine(world.ps_before, world.build_root)], "Windows never had the leftover"
+    assert leftover not in [m[1] for m in _ps_mine(world.real_fw.ps_during, world.build_root)]
 
 
 @then("they show the run's rule inbound, for only the built uxplay.exe and on the Public profile while the run was active")
@@ -226,6 +261,7 @@ def _(world):
     during = _ps_mine(world.real_fw.ps_during, world.build_root)
     assert during == [(s1("firewall").RULE_NAME, world.provenance.executable.lower(), "Inbound", "Allow", "Public",
                        "Any/Any")], during
+    assert [r["Enabled"] for r in world.real_fw.ps_during if _ps_owned(r, world.build_root)] == ["True"]
 
 
 @then("they show no owned rule after the run")
@@ -317,6 +353,8 @@ def _(world):
         assert _contains(launched, flags), flags
     assert not set(launched) & FORBIDDEN_FLAGS
     assert read_json(_latest(world) / "run.json")["command"] == launched, "the saved command isn't the one launched"
+    ran = _launched_os_row(world)["CommandLine"]
+    assert ran == subprocess.list2cmdline(launched), f"Windows ran {ran!r}, not the requested command"
 
 
 @then(parsers.re("the run records the launch time, the deadline 600 seconds later, the end time and the reason " + Q.format("reason")))
@@ -324,7 +362,7 @@ def _(world, reason):
     rec = read_json(_latest(world) / "run.json")
     assert reason == world.expect_reason
     assert rec["deadline"] == rec["launched_at"] + 600
-    assert rec["launched_at"] <= rec["ended_at"] <= rec["deadline"]
+    assert rec["launched_at"] <= rec["ended_at"]
     assert rec["reason"] == reason
     # The test's own monotonic measurements, not the runner's timestamps.
     launcher = world.real_launcher
@@ -333,9 +371,10 @@ def _(world, reason):
     assert abs((rec["ended_at"] - rec["launched_at"]) - measured) <= 2.0, (rec, measured)
     if reason == "timeout":
         assert 598.0 <= measured <= 605.0, f"stopped {measured:.1f} s after launch"
-        assert rec["ended_at"] == rec["deadline"]
+        assert rec["deadline"] <= rec["ended_at"] <= rec["deadline"] + 5
     else:
         assert measured < 598.0
+        assert rec["ended_at"] <= rec["deadline"]
 
 
 @then("no UxPlay process launched by the run is still running")
@@ -343,8 +382,11 @@ def _(world):
     rec = read_json(_latest(world) / "run.json")
     procs = world.real_launcher.procs
     assert len(procs) == 1, "the test saw no single UxPlay launch"
-    pid = procs[0].pid
+    pid = _launched_os_row(world)["ProcessId"]
     assert rec["pid"] == pid and rec["residual_pid"] is None
+    exe = world.provenance.executable.lower()
+    assert not [r for r in _os_uxplay() if (r.get("ExecutablePath") or "").lower() == exe], \
+        f"{exe} is still running"
     res = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True, text=True)
     assert res.returncode == 0, res.stderr
     assert not [l for l in res.stdout.splitlines() if l.split(",")[1:2] == [f'"{pid}"']], f"process {pid} is still running"
@@ -441,6 +483,7 @@ def _(world):
                 assert obs.get("message") and any(m in obs["message"] for m in KNOWN_MESSAGES), (key, obs)
                 assert obs["message"] in lines[obs["line"] - 1], (key, obs)
                 checked += 1
+    assert len(world.rederived_verdict["sessions"]) == len(spans), "a re-derived session is missing"
     for sv, span in zip(world.rederived_verdict["sessions"], spans):
         assert set(sv["cites"]) <= set(span), (sv["cites"], span)
     assert checked, "the report has no observations to check"

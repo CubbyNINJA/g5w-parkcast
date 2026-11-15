@@ -52,10 +52,11 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/Scripts/python.exe 
 .venv/Scripts/python -m pytest --run-pc        # adds @pc: this PC plus the owner's iPhone
 ```
 
-Run `--run-host` and `--run-pc` from an elevated terminal. The runner creates and removes a
-Windows Firewall rule, and the tests' own firewall check (`tests/steps/firewall_snapshot.ps1`)
-can't read port filters without admin rights. Without elevation, those scenarios fail at once
-rather than pass on partial evidence.
+Run `--run-host` and `--run-pc` from an elevated terminal. Without elevation the suite refuses
+to start (exit 4). The runner creates and removes a Windows Firewall rule. The tests' own
+firewall check (`tests/steps/firewall_snapshot.ps1`) also needs admin rights: on this PC,
+without elevation, `Get-NetFirewallPortFilter -All` was refused ("Access is denied") and the
+script stopped with exit 1. A copy with the port filters left out read all 944 rules.
 
 The project's tests use pytest-bdd in their own `.venv`. hmg_nemesis's main suite
 (`Sources/tests/unit`) stays stdlib plus pytest and never imports anything from here.
