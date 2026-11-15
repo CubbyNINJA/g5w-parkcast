@@ -2,8 +2,8 @@
 Feature: The runner launches HU-Test, waits for the owner, and always stops
   The runner starts the verified UxPlay build as "HU-Test", offering H.264 only and a 1920x720
   display, with its log captured. It waits for the owner, for at most 10 minutes from launch,
-  stops UxPlay however the test ends, and only then cleans up the firewall rule (AIR-006,
-  AIR-007, AIR-013, AIR-028; OD-08, OD-14).
+  stops UxPlay however the test ends, and only then gives the firewall reminder (AIR-006, AIR-007,
+  AIR-013, AIR-028, AIR-033; OD-08, OD-14, OD-31).
 
   @offline @normal @AIR-006 @AIR-028 @AT-06 @AT-28
   Scenario: The launch command offers H.264 only, as HU-Test, at 1920x720, with its log captured
@@ -36,7 +36,6 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     When the runner is started with the extra argument "<option>"
     Then it exits with code 2 and prints usage
-    And no firewall rule is created
     And UxPlay is never launched
 
     Examples:
@@ -51,38 +50,35 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     Given the build at "C:\uxplay-s1\build\uxplay.exe" whose SHA-256 differs from its provenance
     When the runner launches the receiver
     Then the launch is refused naming the SHA-256 mismatch
-    And no firewall rule is created
+    And UxPlay is never launched
 
-  @offline @failure @AIR-006 @AT-06
-  Scenario: UxPlay that fails to start is reported and cleaned up
+  @offline @failure @AIR-006 @AIR-033 @AT-06 @AT-33
+  Scenario: UxPlay that fails to start is reported, with the reminder
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And UxPlay exits at once with code 1
     When the runner launches the receiver
     Then the run reports that UxPlay failed to start, with exit code 1
-    And cleanup runs
+    And the owner is reminded to remove "uxplay.exe" at "C:\uxplay-s1\build\uxplay.exe" from "Windows Defender Firewall > Allowed apps"
 
-  @offline @failure @AIR-006 @AIR-005 @AT-06 @AT-05 @OD-29
-  Scenario: UxPlay's output that can't be captured after the rule exists stops the run and cleans up
+  @offline @failure @AIR-006 @AIR-033 @AT-06 @AT-33 @OD-35
+  Scenario: UxPlay's output that can't be captured stops the run, with the reminder
     Given the verified build and writable run outputs
     And UxPlay starts but its output can't be attached to the run's log
     When the runner attempts to launch the receiver
-    Then the run created its firewall rule before the capture failed
-    And the run reports the diagnostic capture failure
+    Then the run reports the diagnostic capture failure
     And no UxPlay process launched by the run remains running
-    And the temporary firewall rule is removed
-    And its removal is verified
     And the run is not reported as successfully started
+    And the owner is reminded to remove "uxplay.exe" at "C:\uxplay-s1\build\uxplay.exe" from "Windows Defender Firewall > Allowed apps"
 
-  @offline @failure @AIR-006 @AIR-005 @AT-06 @AT-05 @OD-29
-  Scenario: A process that can't be created after the rule exists is reported and cleaned up
+  @offline @failure @AIR-006 @AIR-033 @AT-06 @AT-33 @OD-35
+  Scenario: A process that can't be created is reported, with no reminder
     Given the verified build and writable run outputs
     And creating the UxPlay process raises an operating-system error
     When the runner attempts to launch the receiver
     Then the run reports the process-creation error
     And the run is not reported as successfully started
     And no UxPlay process launched by the run remains running
-    And the temporary firewall rule is removed
-    And its removal is verified
+    And the owner is given no firewall reminder
 
   @offline @normal @AIR-007 @AT-07
   Scenario: The runner tells the owner exactly what to do on the iPhone
@@ -98,7 +94,7 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     When the runner launches the receiver at second 0
     And an iPhone connects at second 300 and reconnects at second 590
     Then UxPlay is stopped at second 600 with the reason "timeout"
-    And firewall cleanup starts only after UxPlay has stopped
+    And the firewall reminder comes only after UxPlay has stopped
     And the log's last line is the runner's end marker naming "timeout"
     And the run records the launch time, the deadline at second 600 and the end at second 600
 
@@ -110,7 +106,7 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     And an iPhone connects at second 590
     And mirroring video starts at second 599
     Then UxPlay is stopped at second 600 with the reason "timeout"
-    And firewall cleanup starts only after UxPlay has stopped
+    And the firewall reminder comes only after UxPlay has stopped
     And the run records the launch at second 0, the deadline at second 600 and the end at second 600
 
   @offline @normal @AIR-007 @AIR-011 @AIR-028 @AT-07 @AT-11 @AT-28
@@ -120,15 +116,15 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     When the runner launches the receiver at second 0
     And the owner ends the test at second 120
     Then UxPlay is stopped at second 120 with the reason "owner ended"
-    And firewall cleanup starts only after UxPlay has stopped
+    And the firewall reminder comes only after UxPlay has stopped
     And the log's last line is the runner's end marker naming "owner ended"
     And the run records the deadline at second 600 and the end at second 120
 
-  @offline @failure @AIR-007 @AIR-005 @AT-07 @AT-05
+  @offline @failure @AIR-007 @AIR-033 @AT-07 @AT-33
   Scenario: A UxPlay process that won't stop is reported
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And the UxPlay process ignores the stop request
     When the runner launches the receiver
     And the owner ends the test
     Then the run reports the UxPlay process that is still running, with its process ID
-    And cleanup still removes the firewall rule
+    And the owner is reminded to remove "uxplay.exe" at "C:\uxplay-s1\build\uxplay.exe" from "Windows Defender Firewall > Allowed apps"

@@ -74,7 +74,7 @@ Feature: What the run keeps, what it publishes, and what it claims
     When the summary is written
     Then the summary does not claim the owner's iPhone mirrors to the receiver
 
-  @pc @normal @AIR-005 @AIR-006 @AIR-007 @AIR-011 @AIR-012 @AIR-013 @AIR-028 @AT-05 @AT-06 @AT-07 @AT-11 @AT-12 @AT-13 @AT-28 @OD-15
+  @pc @normal @AIR-006 @AIR-007 @AIR-011 @AIR-012 @AIR-013 @AIR-028 @AIR-033 @AIR-034 @AT-06 @AT-07 @AT-11 @AT-12 @AT-13 @AT-28 @AT-33 @AT-34 @OD-15
   Scenario: The live test: the owner's iPhone mirrors to HU-Test
     Given the verified build and this PC's network
     And the owner's iPhone on iOS 27 on the same network
@@ -84,7 +84,9 @@ Feature: What the run keeps, what it publishes, and what it claims
     And the recorded launch command is the one the offline launch scenarios specify
     And the run records the launch time, the deadline 600 seconds later, the end time and the reason "owner ended"
     And no UxPlay process launched by the run is still running
-    And no rule the runner owns remains in the firewall
+    And the owner was told about Windows' prompt before UxPlay started
+    And the owner was reminded to remove the launched uxplay.exe's allowance after UxPlay stopped
+    And the run record says the firewall was "owner-handled"
     And the log starts with the runner's start marker and ends with its end marker and a newline
     And the owner's sound note and the iOS version with its build, marked "owner-entered", are recorded
     And the live run's folder, the build tree and the working directory hold no video, image or stream dump file
