@@ -14,13 +14,28 @@ the stick and is not committed; only its structure and non-identifying values ar
 | Rows | `AllMenu`, `MenuIcon`, `Basic_Widget`, `Advanced_Widget` and `PhotoFrame` are **empty**. `HomeType` is `2` for `User_0`..`User_2`. `Common` is `edit_widget_available=0`, `allmenu_revision=2`. | The All Menus order comes from defaults in code; a row is written only after the owner edits the menu. What `menu_items` may name is unknown from the database alone. |
 | Provider | `com.hkmc.system.app.homesetting.provider` (`.provider.HomeSettingProvider`). Activities `AllMenuEdit`, `EditWidgetActivity`, `MainListActivity`. Receiver `.receiver.HomeSettingReceiver` (backup, restore, profile and locale actions). | The launcher probably reads the menu through this provider. |
 
-## Not settled
+## What the launcher code shows (home-code-probe, 17:24)
 
-- Whether an `AllMenu` entry can name an arbitrary package or component, or only items from a fixed
-  list in code. The follow-up `home-code-probe` copies `HKMC_HomeSetting_WP.odex`,
-  `Launcher_WP3.odex` and `RightScreenHome.odex` to the stick for reading on the PC.
-- Writing to `homesetting.db` or its provider would be a change to stock data and needs the owner's
-  decision even if the code allows it.
+`home-code-probe` copied `Launcher_WP3.odex`, `HKMC_HomeSetting_WP.odex`, `HKMC_HomeSetting_WP.apk` and
+`RightScreenHome.odex` to the stick (OEM binaries, not committed). Read on the PC with a stdlib DEX
+reader; class names are the launcher's obfuscated ones.
+
+| Item | Finding |
+|---|---|
+| Stored menu | The launcher reads `content://com.hkmc.system.app.homesetting.provider/all_menu`, takes the last row for the user (`aY.gF`), and parses `menu_items` as JSON `{"menuItems":[{"itemId":<int>,"packageName":<str>,"className":<str>},...]}` (`ce.U`). |
+| Built-in entries | Every All Menus entry is its own hard-coded class (subclasses of `view/a/Q`, built in `view/a/g.load()`), each with a fixed package and activity, for example `com.daudio.app.mirrorlink` / `.ui.MirrorLinkActivity` (`view/a/N`) and `com.daudio.av.app.usbvideo` / `.ui.VideoActivity` (`view/a/z`). |
+| Matching | A stored item is resolved by `view/a/g.a(packageName, className, …)`, which only searches that built-in entry list and returns nothing for anything else. |
+| Installed apps | The launcher never queries installed apps (`queryIntentActivities`, `getInstalledPackages` and `getInstalledApplications` are not called anywhere in it). |
+| Visibility | An entry's visibility comes from region and variant checks and `Settings.System` flags (MirrorLink: `mirrorlink_information`, `_dr1`, `_dr2`), not from whether its app is installed. |
+
+## Conclusion for AMB-69
+
+The stock home screen cannot show an icon for a third-party app without patching the launcher. There
+is no widget host, and an `AllMenu` row can only reorder or hide the built-in entries; one naming
+another package is not resolved. The only other route found is to take over a built-in entry: install
+the receiver under a stock package and activity name that this unit doesn't have (such as MirrorLink's)
+and set that entry's visibility flag. That shows the stock entry's label and icon, impersonates an OEM
+package, and changes a stock system setting, so it is not proposed; it is listed for the owner only.
 
 The probe's log line `copied  database file(s)` lacks the count because toolbox has no `wc`; two files
-were copied (`homesetting.db`, `homesetting.db-journal`).
+were copied (`homesetting.db`, `homesetting.db-journal`). The probe now counts without `wc`.
