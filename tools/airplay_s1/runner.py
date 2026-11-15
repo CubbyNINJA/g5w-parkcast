@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from airplay_s1 import build, logfile
+from airplay_s1 import build, logfile, prereqs
 
 NAME = "HU-Test"
 DISPLAY = "1920x720@60"
@@ -222,12 +222,20 @@ class SubprocessProc:
 
 class SubprocessLauncher:
     """Starts uxplay.exe itself, with no shell or wrapper, its output going to the run's log. It
-    gets its own process group, so the console's Ctrl+C reaches the runner, which then stops it."""
+    gets its own process group, so the console's Ctrl+C reaches the runner, which then stops it.
+
+    The MSYS2 build links against UCRT64's DLLs (GStreamer, libplist, ...), so that folder goes
+    first on UxPlay's own PATH. Without it Windows refuses to start it (0xC0000135, DLL not found)."""
+
+    def __init__(self, dll_dir=None):
+        self.dll_dir = Path(dll_dir) if dll_dir else prereqs.MSYS2 / "ucrt64" / "bin"
 
     def start(self, argv, log) -> SubprocessProc:
         flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        env = dict(os.environ)
+        env["PATH"] = str(self.dll_dir) + os.pathsep + env.get("PATH", "")
         popen = subprocess.Popen(list(argv), stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                                 creationflags=flags)
+                                 creationflags=flags, env=env)
         return SubprocessProc(popen)
 
 
