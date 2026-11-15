@@ -3,7 +3,7 @@ Feature: Regulation evidence, the log cap and logging failures
   The stock regulation state is logged but never decides video. Receiver logs live in
   /data/nemesis/logs/airplay-receiver/, two rotated files capped at 5,242,880 bytes together. A
   logging failure never changes the gate and shows at most one notice per app start (AIR-038 to
-  AIR-040; OD-47, OD-49, OD-57 to OD-59, OD-73, OD-82, OD-85, OD-88, OD-101, OD-102).
+  AIR-040; OD-47, OD-49, OD-57 to OD-59, OD-73, OD-82, OD-85, OD-88, OD-101 to OD-103, OD-105).
 
   Clock times, "runs for", "within 10 ms", the default Park getter behaviour, the ACC registration
   steps and the two on-screen notices are as defined in 09_parking_gate.feature.
@@ -43,10 +43,10 @@ Feature: Regulation evidence, the log cap and logging failures
     And the older log file <older>
 
     Examples:
-      | before  | size    | rotation                                              | older                          |
-      | 2621430 | 9       | holds 2621439 bytes and was not rotated               | is kept                        |
-      | 2621430 | 10      | holds exactly 2621440 bytes and was then rotated      | was deleted as a whole file    |
-      | 0       | 2621440 | holds exactly 2621440 bytes and was then rotated      | was deleted as a whole file    |
+      | before  | size    | rotation                                         | older                       |
+      | 2621430 | 9       | holds 2621439 bytes and was not rotated          | is kept                     |
+      | 2621430 | 10      | holds exactly 2621440 bytes and was then rotated | was deleted as a whole file |
+      | 0       | 2621440 | holds exactly 2621440 bytes and was then rotated | was deleted as a whole file |
 
   @offline @boundary @AIR-039 @AT-39 @OD-73 @OD-82
   Scenario Outline: A record that would carry the current file past 2,621,440 bytes goes whole into a new file
@@ -58,9 +58,20 @@ Feature: Regulation evidence, the log cap and logging failures
     And the rotated file contains no part of the record
 
     Examples:
-      | before  | size    |
-      | 2621430 | 11      |
-      | 2621439 | 2       |
+      | before  | size |
+      | 2621430 | 11   |
+      | 2621439 | 2    |
+
+  @offline @boundary @AIR-039 @AT-39 @OD-57 @OD-73 @OD-82
+  Scenario: A record of exactly 2,621,440 bytes into a non-empty current file rotates before and after it is written
+    Given the current log file holds 1000 bytes and the older log file holds 1000 bytes
+    When a record of 2621440 bytes is logged
+    Then the current log file was rotated before the record was written
+    And the older 1000-byte log file was deleted as a whole file at that rotation
+    And the whole record is in one file, which holds exactly 2621440 bytes and was then rotated
+    And the file that was current before the record was deleted as a whole file at that second rotation
+    And no rotated file contains part of the record
+    And at no point did the log files together hold more than 5242880 bytes
 
   @offline @boundary @AIR-039 @AT-39 @OD-82 @OD-85 @OD-88
   Scenario: A record larger than 2,621,440 bytes is dropped, and a line says so
@@ -72,7 +83,7 @@ Feature: Regulation evidence, the log cap and logging failures
 
   @offline @boundary @AIR-039 @AT-39 @OD-82 @OD-85 @OD-88
   Scenario: The "record too large" line rotates like any other record
-    Given the current log file holds 2621430 bytes and the older log file holds 1000 bytes
+    Given the current log file holds 2621439 bytes and the older log file holds 1000 bytes
     When a record of 2621441 bytes is logged
     Then the current log file was rotated before the "record too large" line was written
     And the older log file was deleted as a whole file
@@ -103,11 +114,11 @@ Feature: Regulation evidence, the log cap and logging failures
     And the gate's decision didn't change
 
     Examples:
-      | check | video     | fault                           |
-      | on    | permitted | the log file failing to create  |
-      | on    | blocked   | a write failing                 |
-      | off   | permitted | rotation failing to delete      |
-      | on    | permitted | a write failing                 |
+      | check | video     | fault                          |
+      | on    | permitted | the log file failing to create |
+      | on    | blocked   | a write failing                |
+      | off   | permitted | rotation failing to delete     |
+      | on    | permitted | a write failing                |
 
   @offline @normal @AIR-040 @AT-40 @OD-58
   Scenario: After a restart, the first logging failure shows a new notice
@@ -131,16 +142,21 @@ Feature: Regulation evidence, the log cap and logging failures
       | ACC registration throws an exception at 0 ms, and writing the "ACC registration failed" record fails |
       | ACC registration returns no sticky state at 0 ms, and a log write fails at 1000 ms                   |
 
-  @offline @failure @AIR-021 @AIR-040 @AT-21 @AT-40 @OD-58 @OD-101
-  Scenario Outline: With the check off, a failed "ACC registration failed" write still shows one logging-failure notice
-    Given the parking check is off
-    And ACC registration <failure> at 0 ms
-    And writing the "ACC registration failed" record fails
-    When the receiver runs for 2000 ms
+  @offline @failure @AIR-021 @AIR-025 @AIR-040 @AT-21 @AT-25 @AT-40 @OD-58 @OD-103 @OD-105
+  Scenario Outline: With the check off, a failed log write shows one logging-failure notice and nothing else
+    Given the installed receiver.conf holds "video.require_park=false"
+    And ACC registration <registration> at 0 ms
+    And <write> fails
+    When a log write fails again at 4000 ms
+    And the receiver runs for 5000 ms with mirroring active
     Then exactly one logging-failure notice was shown
+    And no registration-failure notice was shown
+    And the parking check is off
     And the parking gate never blocked video
 
     Examples:
-      | failure                  |
-      | throws an exception      |
-      | returns no sticky state  |
+      | registration            | write                                             |
+      | returns sticky status 0 | writing the "parking check off" record            |
+      | throws an exception     | writing the "ACC registration unavailable" record |
+      | returns no sticky state | writing the "ACC registration unavailable" record |
+      | returns sticky status 0 | the first log write after 1000 ms                 |

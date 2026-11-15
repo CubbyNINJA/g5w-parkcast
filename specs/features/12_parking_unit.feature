@@ -53,13 +53,16 @@ Feature: The parking gate on the owner's head unit
     And it shows Park getter calls continuing every 200 ms through both changes, with no re-read at either
     And the owner's display observations show mirroring continuing throughout
 
-  @normal @AIR-019 @AT-19 @OD-91 @OD-100 @OD-101
-  Scenario: Each process start's ACC registration outcome is kept, and any failure was seen on screen
-    Given the receiver package is installed unmodified on the owner's unit, with the parking check on
-    When the receiver starts several times during the test
-    Then the stick evidence holds the ACC registration outcome of every process start, with any "ACC registration failed" and "ignored" records
+  @normal @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-91 @OD-100 @OD-101 @OD-103 @OD-105
+  Scenario: Each process start's ACC registration outcome is kept, with the records and notice its parking check calls for
+    Given the receiver package is installed on the owner's unit
+    When the receiver starts several times during the test, with the parking check on in some starts and off in others
+    Then the stick evidence holds the ACC registration outcome and the parking check state of every process start
+    And for every start with the check on whose registration failed, it holds an "ACC registration failed" record and any "ignored" records
+    And for every start with the check off whose registration failed, it holds an "ACC registration unavailable" record and no "ACC registration failed" or "ignored" record
     And for every start whose registration failed, an observation independent of the receiver's log shows whether a registration-failure notice appeared
-    And a registration that threw or returned no sticky state, and so the registration-failure notice, is listed as unexercised if no start reached it
+    And that observation shows no registration-failure notice in any start with the check off
+    And a registration that threw or returned no sticky state is listed as unexercised, for each check state, if no start reached it
     And the long-off sequence (ACC status 6, 7, 255, shutdown and process start) is listed as unexercised if the unit did not reach it
 
   @normal @AIR-020 @AT-20 @OD-51
@@ -76,13 +79,15 @@ Feature: The parking gate on the owner's head unit
     Then the stick evidence shows the gate never blocked video
     And a review of the integration evidence shows no stock restriction setting changed
 
-  @normal @AIR-021 @AT-21 @OD-83 @OD-84 @OD-87
+  @normal @AIR-021 @AIR-025 @AT-21 @AT-25 @OD-83 @OD-84 @OD-87 @OD-103 @OD-105
   Scenario: With the check off, ADM and a sleep and resume never block video on the unit
     Given the installed receiver.conf holds "video.require_park=false"
     When the owner switches the car off with the head unit up and back on, and later lets the head unit sleep and resume
     Then the stick evidence holds the startup configuration, the gate logs and the owner's display observations
     And it holds the Park getter invocation times and the ACC broadcast history
-    And it holds any "discarded", "ACC registration failed" or "ignored" records
+    And it holds the "parking check off" record and any "discarded" or "ACC registration unavailable" records
+    And it holds no "ACC registration failed" or "ignored" record
+    And a failed ACC registration is listed as unexercised if no start with the check off reached it
     And it shows the gate never blocked video across the ADM changes, the sleep or the resume
 
   @normal @AIR-022 @AIR-037 @AT-22 @AT-37 @OD-48
@@ -106,6 +111,22 @@ Feature: The parking gate on the owner's head unit
     Then the stick evidence holds the start record and one record per gate change
     And each gate-change record matches the gear and display the owner observed at that time
     And the owner saw no on-screen message about the parking check
+
+  @normal @AIR-025 @AT-25 @OD-103 @OD-105
+  Scenario: On the unit, only a start with an explicit false begins with "parking check off"
+    Given the receiver package is installed on the owner's unit
+    When the owner starts the receiver once with the installed receiver.conf holding "video.require_park=false" and once holding "video.require_park=true"
+    Then the stick evidence shows that the false start's first retained record contains "parking check off" and is followed by that start's start record
+    And it shows no "parking check off" record in the true start
+
+  @normal @AIR-026 @AT-26 @OD-104 @OD-105
+  Scenario: On the unit, a gate change caused by a Park reading names its value and receipt time
+    Given the receiver is mirroring parked, with the parking check on
+    When the owner shifts out of Park and back, foot on the brake
+    Then the stick evidence holds the gate-change records for leaving Park and for returning to it
+    And each names the Park value that caused it and that reading's receipt time
+    And each named reading matches a getter reply in the evidence with that value and receipt time
+    And any retained gate change from another cause names that cause and no Park reading
 
   @normal @AIR-026 @AT-26 @OD-71
   Scenario: After a restart with a changed flag, the start record gives the previous value as unknown
@@ -134,9 +155,9 @@ Feature: The parking gate on the owner's head unit
     Then the stick evidence shows the shipped receiver.conf in place and a start record with the parking check <state>
 
     Examples:
-      | edited | action                                                          | state |
-      | false  | reinstalls the package                                          | on    |
-      | true   | installs a package rebuilt to ship "video.require_park=false"   | off   |
+      | edited | action                                                        | state |
+      | false  | reinstalls the package                                        | on    |
+      | true   | installs a package rebuilt to ship "video.require_park=false" | off   |
 
   @normal @AIR-038 @AT-38 @OD-59
   Scenario: Regulation state is logged and doesn't decide video
@@ -168,3 +189,10 @@ Feature: The parking gate on the owner's head unit
     When logging also fails, more than once, in that app start
     Then the owner saw exactly one registration-failure notice and exactly one logging-failure notice in that app start
     And the evidence, kept outside the failed log, shows video blocked throughout that app start
+
+  @failure @AIR-021 @AIR-040 @AT-21 @AT-40 @OD-58 @OD-103 @OD-105
+  Scenario: On the unit, with the check off, a logging failure shows only the logging-failure notice
+    Given an app start on the owner's unit, with the installed receiver.conf holding "video.require_park=false"
+    When logging fails, more than once, in that app start
+    Then the owner saw exactly one logging-failure notice and no registration-failure notice in that app start
+    And the evidence, kept outside the failed log, shows the parking check off and the gate never blocking video

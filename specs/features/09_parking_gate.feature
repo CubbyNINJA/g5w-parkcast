@@ -5,7 +5,7 @@ Feature: Mirrored video only in Park, read from the stock Park getter
   200 ms, one call at a time; a call not answered within 200 ms blocks video. Audio and the iPhone
   connection are never touched by the gate (AIR-016 to AIR-022, AIR-024, AIR-027, AIR-037;
   OD-23, OD-24, OD-46, OD-47, OD-51, OD-56, OD-61 to OD-64, OD-72, OD-83, OD-84, OD-87, OD-88,
-  OD-91, OD-100 to OD-102).
+  OD-91, OD-100 to OD-105).
 
   Times are in milliseconds on a controlled clock. "Within 10 ms" means a reply received 10 ms
   after the call starts. A supported build is one whose ro.build.product starts with "CVEV.".
@@ -28,8 +28,14 @@ Feature: Mirrored video only in Park, read from the stock Park getter
   "Registration-failure notice" and "logging-failure notice" are the two on-screen notices of
   AIR-019(i) and AIR-040, as seen in the synthetic UI output. Their wording, when they appear, how
   long they stay and whether a notice that fails to show is tried again are open (AMB-73, AMB-74)
-  and are not asserted. With the check off, no scenario asserts whether a registration-failure
-  notice appears (AIR-021(b), AMB-72).
+  and are not asserted; scenarios assert only that the two notices' texts differ (OD-104). With
+  the check off, a registration failure shows no registration-failure notice, and with no logging
+  fault the synthetic notice output stays empty (AIR-021(b), OD-103).
+
+  Log records are matched on literal tokens (OD-104, OD-105). A record that contains "discarded"
+  also contains "during sleep" or "after resume", and not the other. A record that contains
+  "ignored" also contains "status=" followed by the status as a decimal integer, "status=missing"
+  or "status=non-integer". receiver.conf contents are written as lines separated by " ; ".
 
   @offline @normal @AIR-016 @AT-16 @OD-24
   Scenario Outline: The package requires Park by default, and its flag can turn that off
@@ -38,9 +44,9 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then the parking check is <state>
 
     Examples:
-      | config                                        | state |
-      | the package's shipped file                    | on    |
-      | a file holding "video.require_park=false"     | off   |
+      | config                                    | state |
+      | the package's shipped file                | on    |
+      | a file holding "video.require_park=false" | off   |
 
   @offline @normal @AIR-017 @AT-17 @OD-61
   Scenario Outline: Only an on-time 1 from the Park getter permits video
@@ -66,13 +72,13 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then mirrored video is blocked
 
     Examples:
-      | getter                              | signal                                                   |
-      | 0 within 10 ms                      | the car reports that it is stationary                    |
-      | with no value within 10 ms          | the car reports that it is stationary                    |
-      | with a failed call within 10 ms     | the car reports that it is stationary                    |
-      | 0 within 10 ms                      | the parking brake reads applied                          |
-      | with no value within 10 ms          | the parking brake reads applied                          |
-      | with a failed call within 10 ms     | the parking brake reads applied                          |
+      | getter                          | signal                                |
+      | 0 within 10 ms                  | the car reports that it is stationary |
+      | with no value within 10 ms      | the car reports that it is stationary |
+      | with a failed call within 10 ms | the car reports that it is stationary |
+      | 0 within 10 ms                  | the parking brake reads applied       |
+      | with no value within 10 ms      | the parking brake reads applied       |
+      | with a failed call within 10 ms | the parking brake reads applied       |
 
   @offline @normal @AIR-017 @AIR-024 @AT-17 @AT-24 @OD-61
   Scenario: Park is read with the same getter at start and every 200 ms, one call at a time
@@ -214,9 +220,9 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then mirrored video is blocked <until>
 
     Examples:
-      | fault                                                     | until                                       |
-      | the Park getter service is missing                        | throughout                                  |
-      | the first Park getter call throws an exception at 10 ms   | until 210 ms, then shown on the next frame  |
+      | fault                                                   | until                                      |
+      | the Park getter service is missing                      | throughout                                 |
+      | the first Park getter call throws an exception at 10 ms | until 210 ms, then shown on the next frame |
 
   @offline @failure @AIR-019 @AT-19
   Scenario Outline: Missing or failing Park information after Park blocks video from the moment it arrives
@@ -241,11 +247,11 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And at most one Park getter call was active at any time
 
     Examples:
-      | reply                     | until                                           |
-      | replies 1 after 10 ms     | until 1110 ms, then shown on the next frame     |
-      | replies 1 after 250 ms    | until 1360 ms, then shown on the next frame     |
-      | replies 0 after 10 ms     | until 1310 ms, then shown on the next frame     |
-      | stays pending to the end  | to the end                                      |
+      | reply                    | until                                       |
+      | replies 1 after 10 ms    | until 1110 ms, then shown on the next frame |
+      | replies 1 after 250 ms   | until 1360 ms, then shown on the next frame |
+      | replies 0 after 10 ms    | until 1310 ms, then shown on the next frame |
+      | stays pending to the end | to the end                                  |
 
   @offline @boundary @AIR-017 @AIR-019 @AT-19 @OD-84 @OD-88
   Scenario: With no call pending, the re-read starts at the resume itself, not on the 200 ms schedule
@@ -279,14 +285,14 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And no record contains "ACC registration failed"
 
     Examples:
-      | extra                                 |
-      | with status 6                         |
-      | with status 7                         |
-      | with status 255                       |
-      | with status 1                         |
-      | with status 3                         |
-      | with the status extra missing         |
-      | with a non-integer status extra "on"  |
+      | extra                                |
+      | with status 6                        |
+      | with status 7                        |
+      | with status 255                      |
+      | with status 1                        |
+      | with status 3                        |
+      | with the status extra missing        |
+      | with a non-integer status extra "on" |
 
   @offline @failure @AIR-019 @AT-19 @OD-87 @OD-88
   Scenario Outline: A change from an awake to an asleep ACC status blocks video and stops polling
@@ -299,24 +305,28 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And the Park getter was called only at 0, 200 and 400 ms
 
     Examples:
-      | awake | asleep                                |
-      | 0     | with status 6                         |
-      | 0     | with status 7                         |
-      | 0     | with status 255                       |
-      | 0     | with status 1                         |
-      | 0     | with status 3                         |
-      | 0     | with the status extra missing         |
-      | 0     | with a non-integer status extra "on"  |
-      | 2     | with status 6                         |
-      | 2     | with status 7                         |
-      | 2     | with status 255                       |
-      | 2     | with status 1                         |
-      | 2     | with status 3                         |
-      | 5     | with status 6                         |
-      | 5     | with status 7                         |
-      | 5     | with status 255                       |
-      | 5     | with status 1                         |
-      | 5     | with status 3                         |
+      | awake | asleep                               |
+      | 0     | with status 6                        |
+      | 0     | with status 7                        |
+      | 0     | with status 255                      |
+      | 0     | with status 1                        |
+      | 0     | with status 3                        |
+      | 0     | with the status extra missing        |
+      | 0     | with a non-integer status extra "on" |
+      | 2     | with status 6                        |
+      | 2     | with status 7                        |
+      | 2     | with status 255                      |
+      | 2     | with status 1                        |
+      | 2     | with status 3                        |
+      | 2     | with the status extra missing        |
+      | 2     | with a non-integer status extra "on" |
+      | 5     | with status 6                        |
+      | 5     | with status 7                        |
+      | 5     | with status 255                      |
+      | 5     | with status 1                        |
+      | 5     | with status 3                        |
+      | 5     | with the status extra missing        |
+      | 5     | with a non-integer status extra "on" |
 
   @offline @normal @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-83 @OD-87 @OD-88
   Scenario Outline: A change between awake ACC statuses (ADM) keeps polling on schedule with no re-read
@@ -329,10 +339,13 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And no record contains "discarded"
 
     Examples:
-      | check | start | changes                              | gate                                 |
-      | on    | 0     | to 2 at 1000 ms and to 0 at 5000 ms  | never blocked video after 10 ms      |
-      | on    | 5     | to 0 at 1000 ms                      | never blocked video after 10 ms      |
-      | off   | 0     | to 2 at 1000 ms and to 0 at 5000 ms  | never blocked video                  |
+      | check | start | changes                             | gate                            |
+      | on    | 0     | to 2 at 1000 ms and to 0 at 5000 ms | never blocked video after 10 ms |
+      | on    | 5     | to 0 at 1000 ms                     | never blocked video after 10 ms |
+      | on    | 0     | to 5 at 1000 ms                     | never blocked video after 10 ms |
+      | on    | 2     | to 5 at 1000 ms                     | never blocked video after 10 ms |
+      | off   | 0     | to 2 at 1000 ms and to 0 at 5000 ms | never blocked video             |
+      | off   | 5     | to 0 at 1000 ms                     | never blocked video             |
 
   @offline @failure @AIR-019 @AT-19 @OD-87
   Scenario: Changes between asleep ACC statuses change nothing
@@ -343,13 +356,18 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then mirrored video is blocked throughout
     And the Park getter was never called
 
+  @host @normal @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-87 @OD-104
+  Scenario: Sleep never comes from the micom power service
+    Given the receiver's sources and its compiled classes
+    When a static scan searches them
+    Then it finds no reference to registerSystemOffResponder
+    And it finds no micom power-service transaction 14
+
   @offline @normal @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-87
-  Scenario Outline: Sleep comes only from the ACC broadcast, whose receiver is unregistered at exit
+  Scenario Outline: The ACC broadcast receiver is unregistered at exit
     Given the parking check is <check>
-    And every call to the synthetic micom power service is recorded
     When the receiver starts, runs for 1000 ms and exits
-    Then no registerSystemOffResponder call (transaction 14) was recorded
-    And the ACC broadcast receiver was unregistered at exit
+    Then the ACC broadcast receiver was unregistered at exit
 
     Examples:
       | check |
@@ -391,23 +409,23 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then mirrored video is blocked throughout
     And the Park getter was called only at 0 ms
 
-  @offline @failure @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-84 @OD-88
+  @offline @failure @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-84 @OD-88 @OD-104
   Scenario Outline: Each discarded reply writes one record that says why it was discarded
     Given the parking check is <check>
     And the Park getter call starting at 0 ms replies 1 at <reply> ms
     And ACC status changes to 6 at 50 ms and to 0 at <resume> ms
     When the receiver runs for 1500 ms
     Then exactly one record contains "discarded"
-    And that record says the reply arrived <case>
+    And that record contains "<token>" and does not contain "<other>"
 
     Examples:
-      | check | reply | resume | case                                            |
-      | on    | 150   | 1000   | during sleep                                    |
-      | on    | 150   | 100    | after resume from a call started before sleep   |
-      | on    | 650   | 100    | after resume from a call started before sleep   |
-      | off   | 150   | 1000   | during sleep                                    |
-      | off   | 150   | 100    | after resume from a call started before sleep   |
-      | off   | 650   | 100    | after resume from a call started before sleep   |
+      | check | reply | resume | token        | other        |
+      | on    | 150   | 1000   | during sleep | after resume |
+      | on    | 150   | 100    | after resume | during sleep |
+      | on    | 650   | 100    | after resume | during sleep |
+      | off   | 150   | 1000   | during sleep | after resume |
+      | off   | 150   | 100    | after resume | during sleep |
+      | off   | 650   | 100    | after resume | during sleep |
 
   @offline @failure @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-72 @OD-84
   Scenario Outline: A discarded reply does not refresh the reading's age
@@ -435,44 +453,126 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And <gate>
 
     Examples:
-      | check | gate                                                                       |
+      | check | gate                                                                              |
       | on    | mirrored video is blocked until 310 ms and shown from the next frame after 310 ms |
-      | off   | the parking gate never blocked video                                       |
+      | off   | the parking gate never blocked video                                              |
 
-  @offline @failure @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-91 @OD-100
+  @offline @failure @AIR-019 @AT-19 @OD-91 @OD-100
   Scenario Outline: A failed ACC registration keeps the receiver asleep for the rest of the run
-    Given the parking check is <check>, on a supported build
+    Given the parking check is on, on a supported build
     And ACC registration <failure> at 0 ms
     When the receiver runs for 5000 ms with mirroring active
     Then the Park getter was never called
-    And <gate>
+    And mirrored video is blocked throughout
     And exactly one record contains "ACC registration failed", and it names "<cause>"
     And ACC registration was attempted only once
 
     Examples:
-      | check | failure                  | cause           | gate                                  |
-      | on    | throws an exception      | exception       | mirrored video is blocked throughout  |
-      | on    | returns no sticky state  | no sticky state | mirrored video is blocked throughout  |
-      | off   | throws an exception      | exception       | the parking gate never blocked video  |
-      | off   | returns no sticky state  | no sticky state | the parking gate never blocked video  |
+      | failure                 | cause           |
+      | throws an exception     | exception       |
+      | returns no sticky state | no sticky state |
 
-  @offline @failure @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-100
+  @offline @failure @AIR-021 @AT-21 @OD-91 @OD-103 @OD-105
+  Scenario Outline: With the check off, a failed ACC registration is logged as unavailable, not as a failure
+    Given the parking check is off, on a supported build
+    And ACC registration <failure> at 0 ms
+    When the receiver runs for 5000 ms with mirroring active
+    Then the Park getter was never called
+    And the parking gate never blocked video
+    And exactly one record contains "ACC registration unavailable", and it names "<cause>"
+    And no record contains "ACC registration failed"
+    And ACC registration was attempted only once
+
+    Examples:
+      | failure                 | cause           |
+      | throws an exception     | exception       |
+      | returns no sticky state | no sticky state |
+
+  @offline @failure @AIR-021 @AT-21 @OD-103 @OD-105
+  Scenario Outline: With the check off, the "ACC registration unavailable" record has no failure wording
+    Given the parking check is off, on a supported build
+    And ACC registration <failure> at 0 ms
+    When the receiver runs for 1000 ms
+    Then the record that contains "ACC registration unavailable" contains neither "fail" nor "error" in any letter case
+    And no record contains "SyntheticFailureError" or "synthetic failure error"
+    And no record contains a stack trace
+
+    Examples:
+      | failure                                                                   |
+      | throws a SyntheticFailureError with the message "synthetic failure error" |
+      | returns no sticky state                                                   |
+
+  @offline @failure @AIR-021 @AT-21 @OD-103
+  Scenario Outline: With the check off, a failed ACC registration shows no notice
+    Given the parking check is off, on a supported build
+    And ACC registration <failure> at 0 ms
+    When the receiver runs for 5000 ms with mirroring active
+    Then no registration-failure notice was shown at any time
+    And the synthetic notice output is empty
+
+    Examples:
+      | failure                 |
+      | throws an exception     |
+      | returns no sticky state |
+
+  @offline @failure @AIR-019 @AT-19 @OD-100 @OD-104 @OD-105
   Scenario Outline: After a registration with no sticky state, later ACC broadcasts are logged as ignored
-    Given the parking check is <check>, on a supported build
+    Given the parking check is on, on a supported build
     And ACC registration returns no sticky state at 0 ms
     When an ACC broadcast <extra> arrives at 1000 ms
     And the receiver runs for 2000 ms with mirroring active
     Then the Park getter was never called
-    And <gate>
-    And exactly one record contains "ignored", and it <says>
+    And mirrored video is blocked throughout
+    And exactly one record contains "ignored", and it contains "<token>"
 
     Examples:
-      | check | extra                                | says                                     | gate                                  |
-      | on    | with status 0                        | gives status 0                           | mirrored video is blocked throughout  |
-      | on    | with status 5                        | gives status 5                           | mirrored video is blocked throughout  |
-      | on    | with the status extra missing        | says the status extra is missing         | mirrored video is blocked throughout  |
-      | on    | with a non-integer status extra "on" | says the status extra is not an integer  | mirrored video is blocked throughout  |
-      | off   | with status 0                        | gives status 0                           | the parking gate never blocked video  |
+      | extra                                | token              |
+      | with status 0                        | status=0           |
+      | with status 5                        | status=5           |
+      | with status 255                      | status=255         |
+      | with the status extra missing        | status=missing     |
+      | with a non-integer status extra "on" | status=non-integer |
+
+  @offline @failure @AIR-021 @AT-21 @OD-103 @OD-105
+  Scenario: With the check off, ACC broadcasts after a registration with no sticky state write no record
+    Given the parking check is off, on a supported build
+    And ACC registration returns no sticky state at 0 ms
+    When ACC status changes to 0 at 1000 ms
+    And ACC status changes to 5 at 2000 ms
+    And an ACC broadcast with the status extra missing arrives at 3000 ms
+    And an ACC broadcast with a non-integer status extra "on" arrives at 4000 ms
+    And the receiver runs for 5000 ms with mirroring active
+    Then no record was written from just before to just after each of those broadcasts
+    And no record contains "ignored"
+    And none of those broadcasts was a resume or started a re-read
+    And the Park getter was never called
+    And the parking gate never blocked video
+
+  @offline @boundary @AIR-021 @AT-21 @OD-103 @OD-105
+  Scenario Outline: With the check off, a sticky state with an unusable extra is not a registration failure
+    Given the parking check is off, on a supported build
+    And ACC registration returns <sticky> at 0 ms
+    And ACC status changes to 0 at 1000 ms
+    When the receiver runs for 1500 ms
+    Then no record contains "ACC registration unavailable"
+    And the Park getter was called only at 1000, 1200 and 1400 ms
+
+    Examples:
+      | sticky                                       |
+      | a sticky state with the status extra missing |
+      | a sticky state with a non-integer extra "on" |
+
+  @offline @failure @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-105
+  Scenario: A check that is on by fallback logs a failed registration and ignored broadcasts as with the check on
+    Given the installed receiver.conf is missing
+    And ACC registration returns no sticky state at 0 ms
+    When ACC status changes to 0 at 1000 ms
+    And the receiver runs for 2000 ms
+    Then the parking check is on
+    And exactly one record contains "ACC registration failed", and it names "no sticky state"
+    And exactly one record contains "ignored", and it contains "status=0"
+    And no record contains "ACC registration unavailable"
+    And no record contains "parking check off"
 
   @offline @failure @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-100
   Scenario Outline: After a failed ACC registration, exit still completes
@@ -483,11 +583,11 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And the ACC broadcast receiver was <unregister>
 
     Examples:
-      | check | failure                  | unregister             |
-      | on    | throws an exception      | never unregistered     |
-      | on    | returns no sticky state  | unregistered once      |
-      | off   | throws an exception      | never unregistered     |
-      | off   | returns no sticky state  | unregistered once      |
+      | check | failure                 | unregister         |
+      | on    | throws an exception     | never unregistered |
+      | on    | returns no sticky state | unregistered once  |
+      | off   | throws an exception     | never unregistered |
+      | off   | returns no sticky state | unregistered once  |
 
   @offline @normal @AIR-019 @AIR-037 @AT-19 @AT-37 @OD-91 @OD-100
   Scenario Outline: A new process start whose ACC registration works ends a registration failure
@@ -518,24 +618,26 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And ACC registration <failure> at 0 ms
     When the receiver runs for 5000 ms with mirroring active
     Then exactly one registration-failure notice was shown
-    And it names the ACC registration failure as the reason mirrored video is blocked
-    And it can be told apart from the logging-failure notice
     And mirrored video is blocked throughout
 
     Examples:
-      | failure                  |
-      | throws an exception      |
-      | returns no sticky state  |
+      | failure                 |
+      | throws an exception     |
+      | returns no sticky state |
 
-  @offline @failure @AIR-019 @AT-19 @OD-102
+  @offline @failure @AIR-019 @AT-19 @OD-100 @OD-102 @OD-104
   Scenario: ACC broadcasts ignored after a registration with no sticky state add no notice
     Given the parking check is on, on a supported build
     And ACC registration returns no sticky state at 0 ms
     When ACC status changes to 0 at 1000 ms
     And ACC status changes to 5 at 2000 ms
     And an ACC broadcast with the status extra missing arrives at 3000 ms
-    And the receiver runs for 4000 ms
+    And an ACC broadcast with a non-integer status extra "on" arrives at 4000 ms
+    And the receiver runs for 5000 ms
     Then exactly one registration-failure notice was shown in the whole run
+    And exactly four records contain "ignored"
+    And in order they contain "status=0", "status=5", "status=missing" and "status=non-integer"
+    And the Park getter was never called
 
   @offline @boundary @AIR-019 @AT-19 @OD-102
   Scenario Outline: A registration that returns a sticky state never shows a registration-failure notice
@@ -546,12 +648,12 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then no registration-failure notice was shown at any time
 
     Examples:
-      | sticky                                       | returns | later                                       |
-      | sticky status 0                              | 300     | nothing else happens                        |
-      | sticky status 0                              | 0       | nothing else happens                        |
-      | sticky status 6                              | 0       | nothing else happens                        |
-      | a sticky state with the status extra missing | 0       | ACC status changes to 0 at 1000 ms          |
-      | a sticky state with a non-integer extra "on" | 0       | ACC status changes to 0 at 1000 ms          |
+      | sticky                                       | returns | later                              |
+      | sticky status 0                              | 300     | nothing else happens               |
+      | sticky status 0                              | 0       | nothing else happens               |
+      | sticky status 6                              | 0       | nothing else happens               |
+      | a sticky state with the status extra missing | 0       | ACC status changes to 0 at 1000 ms |
+      | a sticky state with a non-integer extra "on" | 0       | ACC status changes to 0 at 1000 ms |
 
   @offline @failure @AIR-019 @AT-19 @OD-102
   Scenario Outline: A check that is on by fallback still shows the registration-failure notice
@@ -562,12 +664,14 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And exactly one registration-failure notice was shown
 
     Examples:
-      | config                                   |
-      | is missing                               |
-      | is unreadable                            |
-      | holds "video.require_park=maybe"         |
+      | config                                                     |
+      | is missing                                                 |
+      | is unreadable                                              |
+      | holds "video.require_park=maybe"                           |
+      | holds "other.key=false"                                    |
+      | holds "video.require_park=false ; video.require_park=true" |
 
-  @offline @failure @AIR-019 @AIR-040 @AT-19 @AT-40 @OD-101 @OD-102
+  @offline @failure @AIR-019 @AIR-040 @AT-19 @AT-40 @OD-101 @OD-102 @OD-104
   Scenario Outline: A registration failure whose record cannot be written shows both notices
     Given the parking check is on, on a supported build
     And ACC registration <failure> at 0 ms
@@ -575,11 +679,12 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     When the receiver runs for 2000 ms
     Then exactly one registration-failure notice was shown
     And exactly one logging-failure notice was shown
+    And the two notices' texts differ
 
     Examples:
-      | failure                  |
-      | throws an exception      |
-      | returns no sticky state  |
+      | failure                 |
+      | throws an exception     |
+      | returns no sticky state |
 
   @offline @failure @AIR-019 @AT-19 @OD-102
   Scenario Outline: Showing the registration-failure notice, or failing to show it, changes nothing
@@ -608,9 +713,9 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then exactly one registration-failure notice was shown since the restart
 
     Examples:
-      | failure                  |
-      | throws an exception      |
-      | returns no sticky state  |
+      | failure                 |
+      | throws an exception     |
+      | returns no sticky state |
 
   @offline @boundary @AIR-018 @AT-18 @OD-46 @OD-61
   Scenario Outline: Leaving Park removes the image within 250 ms of the poll that sees it
@@ -657,11 +762,11 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And the bounds it names as broken are <broken>
 
     Examples:
-      | shift | return | hide | verdict  | broken                                       |
-      | 399   | 400    | 650  | accepted | none                                         |
-      | 399   | 400    | 651  | rejected | the 250 ms removal                           |
-      | 401   | 602    | 652  | rejected | the 200 ms polling                           |
-      | 400   | 600    | 851  | rejected | the 250 ms removal and the 450 ms total      |
+      | shift | return | hide | verdict  | broken                                  |
+      | 399   | 400    | 650  | accepted | none                                    |
+      | 399   | 400    | 651  | rejected | the 250 ms removal                      |
+      | 401   | 602    | 652  | rejected | the 200 ms polling                      |
+      | 400   | 600    | 851  | rejected | the 250 ms removal and the 450 ms total |
 
   @offline @failure @AIR-020 @AT-20 @OD-47 @OD-51
   Scenario Outline: Only a CVEV.* ro.build.product is a supported build
@@ -672,14 +777,14 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then mirrored video is <result>
 
     Examples:
-      | product                                     | result    |
-      | "CVEV.CAN.0000.V015.011.260206"             | permitted |
-      | "CVEV.USA.0000.V016.002.270415"             | permitted |
-      | "CVEV.KOR.0000.V014.000.251020"             | permitted |
-      | "NE1.CAN.0000.V015.011.260206"              | blocked   |
-      | "NE1.CAN.CVEV.260206"                       | blocked   |
-      | missing                                     | blocked   |
-      | unreadable                                  | blocked   |
+      | product                         | result    |
+      | "CVEV.CAN.0000.V015.011.260206" | permitted |
+      | "CVEV.USA.0000.V016.002.270415" | permitted |
+      | "CVEV.KOR.0000.V014.000.251020" | permitted |
+      | "NE1.CAN.0000.V015.011.260206"  | blocked   |
+      | "NE1.CAN.CVEV.260206"           | blocked   |
+      | missing                         | blocked   |
+      | unreadable                      | blocked   |
 
   @offline @failure @AIR-020 @AT-20 @OD-51
   Scenario: Other build properties don't stand in for ro.build.product
@@ -729,17 +834,17 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     And the parking gate never blocked video
 
     Examples:
-      | extra                                | then                              | calls                                         |
-      | with status 0                        | nothing else changes              | 50, 250, 450, 650, 850, 1050, 1250 and 1450 ms |
-      | with status 2                        | nothing else changes              | 50, 250, 450, 650, 850, 1050, 1250 and 1450 ms |
-      | with status 5                        | nothing else changes              | 50, 250, 450, 650, 850, 1050, 1250 and 1450 ms |
-      | with status 6                        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                        |
-      | with status 7                        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                        |
-      | with status 255                      | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                        |
-      | with status 1                        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                        |
-      | with status 3                        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                        |
-      | with the status extra missing        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                        |
-      | with a non-integer status extra "on" | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                        |
+      | extra                                | then                               | calls                                          |
+      | with status 0                        | nothing else changes               | 50, 250, 450, 650, 850, 1050, 1250 and 1450 ms |
+      | with status 2                        | nothing else changes               | 50, 250, 450, 650, 850, 1050, 1250 and 1450 ms |
+      | with status 5                        | nothing else changes               | 50, 250, 450, 650, 850, 1050, 1250 and 1450 ms |
+      | with status 6                        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                         |
+      | with status 7                        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                         |
+      | with status 255                      | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                         |
+      | with status 1                        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                         |
+      | with status 3                        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                         |
+      | with the status extra missing        | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                         |
+      | with a non-integer status extra "on" | ACC status changes to 0 at 1000 ms | 1000, 1200 and 1400 ms                         |
 
   @offline @failure @AIR-021 @AT-21 @OD-83 @OD-84
   Scenario Outline: With the check off, sleep stops polling but the gate blocks nothing, before or after resume
@@ -758,6 +863,27 @@ Feature: Mirrored video only in Park, read from the stock Park getter
       | 1     | 350   | 320    | 350    |
       | 1     | 850   | 320    | 850    |
       | 0     | 350   | 320    | 350    |
+
+  @offline @failure @AIR-021 @AT-21 @OD-83 @OD-84 @OD-87
+  Scenario Outline: With the check off, every asleep ACC status stops polling without blocking video
+    Given the parking check is off
+    And the Park getter call starting at 200 ms replies 1 at 350 ms
+    And an ACC broadcast <asleep> arrives at 300 ms
+    And ACC status changes to 0 at 1000 ms
+    And the re-read replies 1 after 100 ms
+    When the receiver runs for 2000 ms with mirroring active
+    Then no Park getter call started after 200 ms and before 1000 ms
+    And the re-read was called at exactly 1000 ms
+    And the parking gate never blocked video
+
+    Examples:
+      | asleep                               |
+      | with status 7                        |
+      | with status 255                      |
+      | with status 1                        |
+      | with status 3                        |
+      | with the status extra missing        |
+      | with a non-integer status extra "on" |
 
   @offline @normal @AIR-022 @AIR-037 @AT-22 @AT-37 @OD-23 @OD-48
   Scenario Outline: The gate never mutes, stops or disconnects audio
