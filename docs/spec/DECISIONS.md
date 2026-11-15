@@ -65,3 +65,4 @@ Scenarios cite these IDs where a decision is what they assert.
 | OD-57 | 2026-11-15 | The log cap is 5,242,880 bytes (5 MiB) across all the receiver's logs together, kept as two rotated files; when the cap is reached the oldest whole file is deleted. (Was AMB-37.) | Owner choice: "5 MiB total, drop oldest file" |
 | OD-58 | 2026-11-15 | The on-screen logging-failure notice is shown at most once per app start. (Was AMB-38.) | Owner choice: "Accept both" |
 | OD-59 | 2026-11-15 | The stock regulation state is logged at app start and on every change notification; an unavailable state is logged as `unavailable` with the reason. (Was AMB-39.) | Owner choice: "Accept both" |
+| OD-60 | 2026-11-15 | If an update or reinstall fails before the shipped `receiver.conf` is in place, nothing extra is required: a missing or unreadable file already means the parking check is on (AIR-023(b)). (Was AMB-40.) | Owner: "Yes" to accepting the proposal |
