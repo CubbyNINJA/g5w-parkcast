@@ -48,7 +48,7 @@ back through the coverage review before more code is written.
 ```bash
 uv venv --python 3.12 .venv && uv pip install --python .venv/Scripts/python.exe -r requirements-dev.txt
 .venv/Scripts/python -m pytest                 # @offline only (default)
-.venv/Scripts/python -m pytest --run-host      # adds @host: this PC's MSYS2, firewall and repo, no iPhone
+.venv/Scripts/python -m pytest --run-host      # adds @host: this PC's MSYS2 and repo, no iPhone
 .venv/Scripts/python -m pytest --run-pc        # adds @pc: this PC plus the owner's iPhone
 ```
 

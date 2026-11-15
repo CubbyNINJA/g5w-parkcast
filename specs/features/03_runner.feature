@@ -87,7 +87,7 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     Then the owner is told to open Control Center, tap Screen Mirroring and choose "HU-Test"
     And the owner is told how to end the test
 
-  @offline @boundary @AIR-007 @AIR-011 @AIR-028 @AT-07 @AT-11 @AT-28 @OD-08
+  @offline @boundary @AIR-007 @AIR-011 @AIR-028 @AT-07 @AT-11 @AT-28 @OD-08 @AIR-033 @AT-33
   Scenario: The timeout is 10 minutes from launch and a connection doesn't restart it
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And a controlled clock
@@ -98,7 +98,7 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     And the log's last line is the runner's end marker naming "timeout"
     And the run records the launch time, the deadline at second 600 and the end at second 600
 
-  @offline @boundary @AIR-007 @AIR-011 @AT-07 @AT-11 @OD-08
+  @offline @boundary @AIR-007 @AIR-011 @AT-07 @AT-11 @OD-08 @AIR-033 @AT-33
   Scenario: Video starting just before the deadline doesn't extend the test
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And a controlled clock
@@ -109,7 +109,7 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     And the firewall reminder comes only after UxPlay has stopped
     And the run records the launch at second 0, the deadline at second 600 and the end at second 600
 
-  @offline @normal @AIR-007 @AIR-011 @AIR-028 @AT-07 @AT-11 @AT-28
+  @offline @normal @AIR-007 @AIR-011 @AIR-028 @AT-07 @AT-11 @AT-28 @AIR-033 @AT-33
   Scenario: The owner can end the test early
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And a controlled clock
@@ -120,11 +120,13 @@ Feature: The runner launches HU-Test, waits for the owner, and always stops
     And the log's last line is the runner's end marker naming "owner ended"
     And the run records the deadline at second 600 and the end at second 120
 
-  @offline @failure @AIR-007 @AIR-033 @AT-07 @AT-33
+  @offline @failure @AIR-007 @AIR-028 @AIR-033 @AT-07 @AT-28 @AT-33 @OD-42
   Scenario: A UxPlay process that won't stop is reported
     Given the verified build at "C:\uxplay-s1\build\uxplay.exe"
     And the UxPlay process ignores the stop request
     When the runner launches the receiver
     And the owner ends the test
     Then the run reports the UxPlay process that is still running, with its process ID
+    And the log's last line is the runner's end marker naming "owner ended"
+    And the end marker names the process ID still running
     And the owner is reminded to remove "uxplay.exe" at "C:\uxplay-s1\build\uxplay.exe" from "Windows Defender Firewall > Allowed apps"

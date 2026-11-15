@@ -13,9 +13,7 @@ The evidence doesn't rest on what the runner wrote about itself:
 from __future__ import annotations
 
 import json
-import os
 import re
-import signal
 import subprocess
 import time
 from pathlib import Path
@@ -48,7 +46,11 @@ class RecordedProc:
 
     def stop(self, *args, **kwargs):
         self.launcher.stop_times.append(time.monotonic())
-        return self.inner.stop(*args, **kwargs)
+        self.launcher.events.add("proc.stop", pid=self.inner.pid)
+        stopped = self.inner.stop(*args, **kwargs)
+        if self.inner.poll() is not None:
+            self.launcher.events.add("proc.exit", pid=self.inner.pid)
+        return stopped
 
 
 class RecordingLauncher:
@@ -115,7 +117,8 @@ class RecordingOwner:
         self.events = events
 
     def tell(self, message):
-        self.events.add("owner.tell", text=message)
+        running = _os_uxplay() if "Allowed apps" in message else None
+        self.events.add("owner.tell", text=message, running=running)
         return self.inner.tell(message)
 
     def ended(self, now):
@@ -233,9 +236,13 @@ def _(world):
     assert stopped, "the test saw no stop request"
     told = [e for e in world.events if e["kind"] == "owner.tell" and "Allowed apps" in e["text"]]
     assert len(told) == 1
-    assert world.provenance.executable in told[0]["text"] and "Windows Defender Firewall" in told[0]["text"]
-    start = world.events.first("proc.start")
-    assert world.events.index(told[0]) > start
+    text = told[0]["text"]
+    assert world.provenance.executable in text and "Windows Defender Firewall" in text and "block" in text.lower()
+    index = world.events.index(told[0])
+    assert index > world.events.last("proc.stop"), "the reminder came before UxPlay was stopped"
+    exe = world.provenance.executable.lower()
+    still = [r for r in told[0]["running"] or [] if (r.get("ExecutablePath") or "").lower() == exe]
+    assert not still, f"{exe} was still running when the owner was reminded"
 
 
 @then("the log starts with the runner's start marker and ends with its end marker and a newline")

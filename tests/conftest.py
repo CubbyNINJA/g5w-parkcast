@@ -27,7 +27,7 @@ else:
 
 def pytest_addoption(parser):
     parser.addoption("--run-host", action="store_true", default=False,
-                     help="also run @host scenarios (this PC's MSYS2, firewall and repository; no iPhone)")
+                     help="also run @host scenarios (this PC's MSYS2 and repository; no iPhone)")
     parser.addoption("--run-pc", action="store_true", default=False,
                      help="also run @pc scenarios (this PC's UxPlay build and the owner's iPhone)")
 

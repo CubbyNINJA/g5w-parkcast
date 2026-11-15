@@ -65,9 +65,8 @@ def _(world):
     assert world.launcher.argv is None
 
 
-@when(parsers.re("the run ends by (?P<ending>the owner ending the test|the 10-minute timeout|UxPlay failing to start"
-                 "|UxPlay exiting mid-test|a keyboard interrupt)"))
-def _(world, ending):
+def set_ending(world, ending: str) -> None:
+    """Set up the fakes so the run ends the given way."""
     owner, launcher = world.owner, world.launcher
     owner.end_at = None
     if ending == "the owner ending the test":
@@ -80,8 +79,24 @@ def _(world, ending):
         def interrupt():
             raise KeyboardInterrupt
         world.clock.at(50, interrupt)
+    elif ending == "UxPlay's output failing to be captured":
+        launcher.capture_fails = True
     world.ending = ending
+
+
+ENDINGS = ("the owner ending the test|the 10-minute timeout|UxPlay failing to start|UxPlay exiting mid-test"
+           "|a keyboard interrupt")
+
+
+@when(parsers.re("the run ends by (?P<ending>" + ENDINGS + ")"))
+def _(world, ending):
+    set_ending(world, ending)
     plan_run(world)
+
+
+@given(parsers.re("the run will end by (?P<ending>" + ENDINGS + "|UxPlay's output failing to be captured)"))
+def _(world, ending):
+    set_ending(world, ending)
 
 
 @given("the UxPlay process ignores the stop request")

@@ -160,3 +160,28 @@ Proposals for the owner to rule on, not decisions:
 - That pytest-bdd fills `<condition>` and `<build>` into the Given text for Missing scenarios 1 and 2 was not checked on the installed version.
 - `AMBIGUITY_REGISTER.md` was searched for firewall entries but not read in full. The `.astra/` raw drafts still mention the retired rows; they are history, so not counted as leftovers.
 - `@pc` and `@host` were not run, as instructed.
+
+---
+
+## Applied by the parent (2026-11-14)
+
+The owner ruled on findings 5 and 6: OD-41 (`run` exits 0 for owner ended, timeout and uxplay exited; 1 for refused, failed to start and capture failed; 130 for interrupted) and OD-42 (the end marker is still written when UxPlay won't stop, naming that PID). AIR-028(a) and AIR-031(g) encode them.
+
+| # | What changed |
+|---|---|
+| 1 | `FIREWALL_COMMANDS` is now `NetFirewall\|\bnetsh\b\|advfirewall\|HNetCfg\.Fw\|INetFw\|FwPolicy2`, which also catches list-form netsh. |
+| 2 | The recorder patches `_winapi.CreateProcess`, `os.system`, `os.startfile` and `os.spawn*`. It records and refuses every process, so nothing really starts. A canary is checked before anything is trusted. On this `.venv`, the hook caught `subprocess.run`, list-form `netsh` and a by-name `Popen`, and refused all three. |
+| 3 | Missing scenarios 1 and 2 were added: every command, usage error and preflight stop, plus refused, capture-failed and creation-failed launches. |
+| 4 | The live recorder logs `proc.stop` and `proc.exit` and snapshots Windows's `uxplay.exe` processes at the reminder. The live Then requires the reminder after the last stop, with this build's `uxplay.exe` no longer running, and the block-entry note present. |
+| 5 | OD-41, plus missing scenario 3 with rows for every ending, mid-test exit (0) and Ctrl+C (130) included. |
+| 6 | OD-42. Both won't-stop scenarios assert the end marker naming `owner ended` and the PID. |
+| 7 | The leftover-process report must be an owner message naming the PID, coming before the reminder. The interface page's step 6 says so. |
+| 8 | Missing scenario 4: the reminder outline asserts the owner-handled record and no claims for every ending. |
+| 9 | The no-claims check looks only at firewall-related keys, which must equal `{"firewall": "owner-handled"}`. |
+| 10 | Added a CLI-safe "the console owner is given no firewall notice or reminder" to both preflight outlines. |
+| 11 | The reminder outline has a reason column checked against the end marker. |
+| 12 | Missing scenario 6: a capture failure where UxPlay also won't stop. |
+| 13 | The module list, the `--run-host` help, the README's `@host` text and the AGENTS.md comment no longer mention the firewall. The stale `.pyc` was deleted, and the unused imports removed. |
+| 14 | `trace_specs.py` shows retired rows as `retired (OD-31)` and rejects tags that name them. |
+| 15 | The three timing scenarios are tagged `@AIR-033 @AT-33`. |
+| 16 | AT-33 was reworded. Added a command-level scenario for a run record that can't be written. |

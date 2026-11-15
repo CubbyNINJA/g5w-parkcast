@@ -3,7 +3,7 @@ and the owner-handled record (AIR-032 to AIR-034; OD-31, OD-33 to OD-38)."""
 
 from __future__ import annotations
 
-import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -16,14 +16,14 @@ from steps.world import PROJECT, host_path, read_json, rec, run_dir
 
 Q = r'"(?P<{}>[^"]*)"'
 # Firewall-changing commands, listed here independently of the code under test (AT-32).
-FIREWALL_COMMANDS = re.compile(r"New-NetFirewallRule|Set-NetFirewallRule|Remove-NetFirewallRule|Enable-NetFirewallRule|"
-                               r"Disable-NetFirewallRule|Set-NetFirewallProfile|netsh(?:\.exe)?\s+(?:advfirewall|firewall)",
-                               re.I)
+# Any NetSecurity firewall cmdlet, any netsh, and the firewall COM API, in any form (string or list).
+FIREWALL_COMMANDS = re.compile(r"NetFirewall|\bnetsh\b|advfirewall|HNetCfg\.Fw|INetFw|FwPolicy2", re.I)
 # Ways of sending input to, focusing or closing another program's window.
 WINDOW_CONTROL = re.compile(r"SendKeys|keybd_event|SendInput|PostMessage|SendMessage|SetForegroundWindow|WM_CLOSE|"
                             r"AppActivate|pyautogui|pywinauto", re.I)
 SOURCE_SUFFIXES = {".py", ".ps1", ".psm1", ".sh", ".cmd", ".bat"}
-CLAIMS = re.compile(r"\b(granted|declined|present|removed)\b", re.I)
+CLAIMS = re.compile(r"\b(granted|declined|present|removed|allowed|added|created)\b", re.I)
+FIREWALL_KEYS = re.compile(r"firewall|allow|rule|block", re.I)
 
 
 def _notices(w) -> list[dict]:
@@ -58,6 +58,17 @@ def _(world, box):
 def _(world):
     text = world.notice.lower()
     assert "no prompt" in text and "already" in text and "block" in text and "allow" in text
+
+
+@given("nothing else is set up")
+def _(world):
+    pass
+
+
+@then("the console owner is given no firewall notice or reminder")
+def _(world):
+    told = [m for m in world.owner.messages if "Public networks" in m or "Allowed apps" in m or "firewall" in m.lower()]
+    assert not told, told
 
 
 @then("the owner is given no firewall notice or reminder")
@@ -109,23 +120,42 @@ def _(world):
 @then("the reminder came after the run reported the process it couldn't stop")
 def _(world):
     index = world.events.index(_reminder(world))
-    stops = [i for i, e in enumerate(world.events) if e["kind"] == "proc.stop"]
-    assert stops and stops[-1] < index
+    pid = str(world.launcher.procs[0].pid)
+    reports = [i for i, e in enumerate(world.events) if e["kind"] == "owner.tell" and pid in e["text"]
+               and "Allowed apps" not in e["text"]]
+    assert reports, "the run never told the owner which process it couldn't stop"
+    assert reports[0] < index, "the reminder came before the leftover process was reported"
+
+
+@then("the end marker names the process ID still running")
+def _(world):
+    last = (run_dir(world) / "uxplay.log").read_text(encoding="utf-8").splitlines()[-1]
+    assert s1("logfile").is_end_marker(last) and str(world.launcher.procs[0].pid) in last, last
 
 
 @given("the run record can't be written once UxPlay is running")
 def _(world):
     def block():
-        record = run_dir(world) / "run.json"
-        if record.is_file():
-            record.unlink()
-        record.mkdir(parents=True, exist_ok=True)
+        # Every run folder that exists by now (the runner's or the command's) gets a directory
+        # where its run.json would go, so writing the record fails.
+        for folder in [p for p in world.runs_root.iterdir() if p.is_dir()] if world.runs_root.is_dir() else []:
+            record = folder / "run.json"
+            if record.is_file():
+                record.unlink()
+            record.mkdir(exist_ok=True)
     world.clock.at(10, block)
 
 
 @then("no run record exists")
 def _(world):
-    assert not (run_dir(world) / "run.json").is_file()
+    assert not [p for p in world.runs_root.rglob("run.json") if p.is_file()]
+
+
+@then("the console output doesn't claim a record was made")
+def _(world):
+    said = world.out + world.err + "\n".join(world.owner.messages)
+    assert not re.search(r"\b(saved|written|recorded) (to|in)\b|run\.json (saved|written)", said, re.I), said
+    assert re.search(r"run record", world.err + "\n".join(world.owner.messages), re.I), "the failure wasn't reported"
 
 
 @then("the run doesn't claim a record was made")
@@ -153,8 +183,10 @@ def _(world, value):
 
 @then("the run record doesn't say an allowance was granted, declined, present or removed")
 def _(world):
-    text = _record_path(world).read_text(encoding="utf-8")
-    assert not CLAIMS.search(text), CLAIMS.search(text)
+    record = read_json(_record_path(world))
+    fields = {k: v for k, v in record.items() if FIREWALL_KEYS.search(k)}
+    assert fields == {"firewall": "owner-handled"}, fields
+    assert not CLAIMS.search(str(fields)), fields
 
 
 @then("the summary says the firewall allowance was handled by the owner through Windows' prompt")
@@ -167,24 +199,35 @@ def _(world):
 
 @given("every process the S1 tools start is recorded")
 def _(world, monkeypatch):
-    real = subprocess.Popen
+    """Record every process the tools try to start, through every Windows route, and start none:
+    an offline test must never run a real command, least of all a firewall one."""
+    import _winapi
     world.processes = []
 
-    class Recording(real):
-        def __init__(self, args, *a, **kw):
-            world.processes.append(args if isinstance(args, str) else " ".join(map(str, args)))
-            super().__init__(args, *a, **kw)
+    def refuse(command):
+        world.processes.append(command if isinstance(command, str) else " ".join(map(str, command)))
+        raise OSError(1, "process creation refused by the offline test", world.processes[-1])
 
-    monkeypatch.setattr(subprocess, "Popen", Recording)
+    monkeypatch.setattr(_winapi, "CreateProcess", lambda executable, args, *a, **kw: refuse(args or executable))
+    monkeypatch.setattr(os, "system", refuse)
+    if hasattr(os, "startfile"):
+        monkeypatch.setattr(os, "startfile", lambda path, *a, **kw: refuse(path))
+    for name in ("spawnv", "spawnve", "spawnl", "spawnle"):
+        if hasattr(os, name):
+            monkeypatch.setattr(os, name, lambda mode, path, *a, **kw: refuse([path, *map(str, a[:1])]))
+    # Canary: the hook must see and refuse a process before its silence means anything.
+    try:
+        subprocess.run(["s1-canary", "--probe"])
+    except OSError:
+        pass
+    assert world.processes == ["s1-canary --probe"], world.processes
+    world.processes.clear()
 
 
 @then("none of the recorded processes is a firewall command")
 def _(world):
-    if not world.interrupted:
-        rec(world)
     started = list(world.processes) + [" ".join(e["argv"]) for e in world.events.of("proc.start", "proc.create.failed")]
-    assert started, "no process was recorded at all"
-    assert not [p for p in started if FIREWALL_COMMANDS.search(p) or re.search(r"\bnetsh\b", p, re.I)], started
+    assert not [p for p in started if FIREWALL_COMMANDS.search(p)], started
 
 
 @given(parsers.re("the S1 tools' source under " + Q.format("folder")))

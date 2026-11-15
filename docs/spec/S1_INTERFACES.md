@@ -67,13 +67,17 @@ There is no firewall module. The S1 tools never create, change or remove a firew
      `proc`), report it and stop that process.
   5. Otherwise tell the owner what to do, and wait until the owner ends the test, UxPlay exits,
      or the deadline passes.
-  6. Stop UxPlay and wait for it to exit, or report the process it couldn't stop.
-  7. Only then write the end marker, and save `run.json`.
+  6. Stop UxPlay and wait for it to exit. If it won't stop, tell the owner the process ID still
+     running (an owner message naming the PID), and record it.
+  7. Only then write the end marker, naming the reason and, if UxPlay is still running, its
+     process ID (OD-42). Then save `run.json`.
   8. Last, tell the owner the reminder (AIR-033; OD-33, OD-35, OD-38). It names `uxplay.exe`,
      the exact executable path launched and `Windows Defender Firewall > Allowed apps`, says to
      remove that entry, and says a declined or closed prompt may have left a block entry there
      too. Its text contains `Allowed apps`. It's never written into the log.
 - A keyboard interrupt during the wait still goes through steps 6 to 8.
+- In the CLI, `run` exits 0 for `owner ended`, `timeout` and `uxplay exited`, 1 for `refused`,
+  `failed to start` and `capture failed`, and 130 for `interrupted` (OD-41).
 - `RunRecord` has `started`, `command`, `launched_at`, `deadline`, `ended_at`, `reason`,
   `exit_code`, `errors`, `residual_pid`, `pid`, `record_written` and `to_dict()`.
   - `run.json` holds `to_dict()`, with `firewall: "owner-handled"` (AIR-033(d)) and the build's

@@ -37,12 +37,13 @@ Feature: One command, with predictable exits and no side effects on bad input
       | analyse       | missing log argument     |
       | evaluate      | missing run folder       |
 
-  @offline @failure @AIR-031 @AT-31
+  @offline @failure @AIR-031 @AIR-033 @AT-31 @AT-33 @OD-35
   Scenario Outline: A run without usable build provenance stops before launch
     Given the build provenance file is <state>
     When "s1.py run" runs
     Then it exits with code 1 naming the provenance file
     And UxPlay is never launched
+    And the console owner is given no firewall notice or reminder
 
     Examples:
       | state                |
@@ -50,12 +51,13 @@ Feature: One command, with predictable exits and no side effects on bad input
       | unreadable           |
       | not valid provenance |
 
-  @offline @failure @AIR-031 @AT-31
+  @offline @failure @AIR-031 @AIR-033 @AT-31 @AT-33 @OD-35
   Scenario Outline: An output location that can't be written fails before anything starts
     Given <location> can't be written
     When "s1.py <command>" runs
     Then it exits with code 1 naming that location
     And UxPlay is never launched
+    And the console owner is given no firewall notice or reminder
     And no partial output file is left behind
 
     Examples:
