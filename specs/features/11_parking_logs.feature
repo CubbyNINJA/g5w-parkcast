@@ -3,10 +3,14 @@ Feature: Regulation evidence, the log cap and logging failures
   The stock regulation state is logged but never decides video. Receiver logs live in
   /data/nemesis/logs/airplay-receiver/, two rotated files capped at 5,242,880 bytes together. A
   logging failure never changes the gate and shows at most one notice per app start (AIR-038 to
-  AIR-040; OD-47, OD-49, OD-57 to OD-59).
+  AIR-040; OD-47, OD-49, OD-57 to OD-59, OD-73, OD-82, OD-85, OD-88, OD-101, OD-102).
 
-  Clock times, "runs for", "within 10 ms" and the default Park getter behaviour are as defined in
-  09_parking_gate.feature.
+  Clock times, "runs for", "within 10 ms", the default Park getter behaviour, the ACC registration
+  steps and the two on-screen notices are as defined in 09_parking_gate.feature.
+
+  The "current" log file is the one being written; the "older" file is the one kept from the last
+  rotation. A record's size counts every byte written, including its line terminator. Rotation
+  makes the current file the older file and starts a new, empty current file.
 
   @offline @normal @AIR-038 @AT-38 @OD-59
   Scenario: Regulation state is logged at start and on every change, and unavailable is named
@@ -30,20 +34,66 @@ Feature: Regulation evidence, the log cap and logging failures
       | 0    | unrestricted | blocked   |
       | 0    | unavailable  | blocked   |
 
-  @offline @boundary @AIR-039 @AT-39 @OD-57
-  Scenario Outline: The logs are capped at 5 MiB together, dropping the oldest whole file
-    Given the receiver's two log files hold <before> bytes together
-    When <more> more bytes are logged
-    Then the logs are in /data/nemesis/logs/airplay-receiver/
-    And <outcome>
-    And the logs together never hold more than 5242880 bytes
-    And no file was trimmed
+  @offline @boundary @AIR-039 @AT-39 @OD-57 @OD-73
+  Scenario Outline: The current log file rotates on reaching 2,621,440 bytes, not before
+    Given the current log file holds <before> bytes and the older log file holds 1000 bytes
+    When a record of <size> bytes is logged
+    Then the whole record is in the file that held <before> bytes
+    And that file <rotation>
+    And the older log file <older>
 
     Examples:
-      | before  | more | outcome                                      |
-      | 5242878 | 1    | both files are kept                          |
-      | 5242879 | 1    | reaching 5242880 deleted the oldest file     |
-      | 5242870 | 100  | crossing 5242880 deleted the oldest file     |
+      | before  | size    | rotation                                              | older                          |
+      | 2621430 | 9       | holds 2621439 bytes and was not rotated               | is kept                        |
+      | 2621430 | 10      | holds exactly 2621440 bytes and was then rotated      | was deleted as a whole file    |
+      | 0       | 2621440 | holds exactly 2621440 bytes and was then rotated      | was deleted as a whole file    |
+
+  @offline @boundary @AIR-039 @AT-39 @OD-73 @OD-82
+  Scenario Outline: A record that would carry the current file past 2,621,440 bytes goes whole into a new file
+    Given the current log file holds <before> bytes and the older log file holds 1000 bytes
+    When a record of <size> bytes is logged
+    Then the current log file was rotated before the record was written
+    And the older log file was deleted as a whole file
+    And the whole record is in the new current log file
+    And the rotated file contains no part of the record
+
+    Examples:
+      | before  | size    |
+      | 2621430 | 11      |
+      | 2621439 | 2       |
+
+  @offline @boundary @AIR-039 @AT-39 @OD-82 @OD-85 @OD-88
+  Scenario: A record larger than 2,621,440 bytes is dropped, and a line says so
+    Given the current log file holds 1000 bytes and the older log file holds 1000 bytes
+    When a record of 2621441 bytes is logged
+    Then no part of that record is in either log file
+    And exactly one line was logged in its place
+    And that line contains "record too large" and "2621441"
+
+  @offline @boundary @AIR-039 @AT-39 @OD-82 @OD-85 @OD-88
+  Scenario: The "record too large" line rotates like any other record
+    Given the current log file holds 2621430 bytes and the older log file holds 1000 bytes
+    When a record of 2621441 bytes is logged
+    Then the current log file was rotated before the "record too large" line was written
+    And the older log file was deleted as a whole file
+    And the whole "record too large" line is in the new current log file
+
+  @offline @normal @AIR-039 @AT-39 @OD-57 @OD-73
+  Scenario Outline: The logs are capped at 5 MiB together, dropping the oldest whole file
+    Given the receiver's log folder is empty
+    When records of <size> bytes each are logged until the current file has rotated at least 5 times
+    Then the logs are in /data/nemesis/logs/airplay-receiver/
+    And at no point did the log files together hold more than 5242880 bytes
+    And at no point did either log file hold more than 2621440 bytes
+    And every record still present is whole and in exactly one file
+    And no record was trimmed
+
+    Examples:
+      | size    |
+      | 100     |
+      | 1000000 |
+      | 1700000 |
+      | 2621440 |
 
   @offline @failure @AIR-040 @AT-40 @OD-58
   Scenario Outline: A logging failure shows one notice per app start and never changes the gate
@@ -64,3 +114,33 @@ Feature: Regulation evidence, the log cap and logging failures
     Given one logging notice was shown during the previous app start
     When the receiver restarts and logging fails
     Then exactly one on-screen logging notice was shown since the restart
+
+  @offline @failure @AIR-019 @AIR-040 @AT-19 @AT-40 @OD-58 @OD-101 @OD-102
+  Scenario Outline: A logging failure and an ACC registration failure each show their own notice once
+    Given the parking check is on, on a supported build
+    And <failures>
+    When a log write fails again at 4000 ms
+    And the receiver runs for 5000 ms
+    Then exactly one logging-failure notice was shown
+    And exactly one registration-failure notice was shown
+
+    Examples:
+      | failures                                                                                             |
+      | a log write fails at 0 ms, and ACC registration throws an exception at 50 ms                         |
+      | ACC registration throws an exception at 0 ms, and a log write fails at 1000 ms                       |
+      | ACC registration throws an exception at 0 ms, and writing the "ACC registration failed" record fails |
+      | ACC registration returns no sticky state at 0 ms, and a log write fails at 1000 ms                   |
+
+  @offline @failure @AIR-021 @AIR-040 @AT-21 @AT-40 @OD-58 @OD-101
+  Scenario Outline: With the check off, a failed "ACC registration failed" write still shows one logging-failure notice
+    Given the parking check is off
+    And ACC registration <failure> at 0 ms
+    And writing the "ACC registration failed" record fails
+    When the receiver runs for 2000 ms
+    Then exactly one logging-failure notice was shown
+    And the parking gate never blocked video
+
+    Examples:
+      | failure                  |
+      | throws an exception      |
+      | returns no sticky state  |

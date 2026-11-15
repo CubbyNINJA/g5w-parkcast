@@ -4,6 +4,10 @@ Feature: The parking gate on the owner's head unit
   the PC suite: their evidence is the receiver's logs and the owner's observations, saved to the
   stick. Offline results never stand in for them (AT-16 to AT-27, AT-35 to AT-40).
 
+  A scenario whose Given the unit never reached is reported as unexercised, not as passed. The
+  registration-failure and logging-failure notices are as defined in 09_parking_gate.feature;
+  their wording, timing and duration are not asserted (AMB-73).
+
   @normal @AIR-016 @AT-16
   Scenario: An unmodified package starts with the parking check on
     Given the receiver package is installed unmodified on the owner's unit
@@ -28,12 +32,35 @@ Feature: The parking gate on the owner's head unit
     And the time from the actual shift to the image disappearing is recorded separately
     And no new frame appears from the first poll returning 0 until an on-time reply of 1 after the car is back in Park
 
-  @failure @AIR-019 @AT-19 @OD-56
+  @failure @AIR-019 @AT-19 @OD-56 @OD-83 @OD-84 @OD-87
   Scenario: After a resume from sleep, video waits for a fresh on-time Park reading
     Given the receiver is mirroring parked, with the parking check on
     When the head unit sleeps and resumes
     Then the stick evidence shows video blocked from the resume until a fresh on-time reply of 1
-    And any untested fault or exact-timeout case is listed as unverified
+    And it shows the ACC broadcasts that marked sleep entry and resume, each with its receipt time
+    And it shows no Park getter call while asleep
+    And it names the call that served as the resume re-read, with its invocation time beside the resume broadcast's receipt time
+    And it holds every pre-sleep call that replied after resume and every "discarded" record
+    And it holds the invocation and receipt times of the getter calls, the timeouts and gate changes, and the on-time recovery after them
+    And any untested fault, exact-timeout race, reply during sleep or pre-sleep reply after resume is listed as unverified
+
+  @normal @AIR-019 @AT-19 @OD-83 @OD-87
+  Scenario: Switching the car off with the head unit up (ADM) keeps mirroring while Park permits
+    Given the receiver is mirroring parked, with the parking check on
+    When the owner switches the car off with the head unit staying up, and then back on
+    Then the stick evidence shows ACC status 0, then 2, then 0, each with EXTRA_ACC_STATUS, EXTRA_PREVIOUS_ACC_STATUS and its receipt time
+    And it shows the sticky ACC state returned at registration
+    And it shows Park getter calls continuing every 200 ms through both changes, with no re-read at either
+    And the owner's display observations show mirroring continuing throughout
+
+  @normal @AIR-019 @AT-19 @OD-91 @OD-100 @OD-101
+  Scenario: Each process start's ACC registration outcome is kept, and any failure was seen on screen
+    Given the receiver package is installed unmodified on the owner's unit, with the parking check on
+    When the receiver starts several times during the test
+    Then the stick evidence holds the ACC registration outcome of every process start, with any "ACC registration failed" and "ignored" records
+    And for every start whose registration failed, an observation independent of the receiver's log shows whether a registration-failure notice appeared
+    And a registration that threw or returned no sticky state, and so the registration-failure notice, is listed as unexercised if no start reached it
+    And the long-off sequence (ACC status 6, 7, 255, shutdown and process start) is listed as unexercised if the unit did not reach it
 
   @normal @AIR-020 @AT-20 @OD-51
   Scenario: The unit's own build is recognised as supported
@@ -47,7 +74,16 @@ Feature: The parking gate on the owner's head unit
     Given the installed receiver.conf holds "video.require_park=false"
     When the owner shifts out of Park and back with mirroring active, foot on the brake
     Then the stick evidence shows the gate never blocked video
-    And no stock restriction setting changed
+    And a review of the integration evidence shows no stock restriction setting changed
+
+  @normal @AIR-021 @AT-21 @OD-83 @OD-84 @OD-87
+  Scenario: With the check off, ADM and a sleep and resume never block video on the unit
+    Given the installed receiver.conf holds "video.require_park=false"
+    When the owner switches the car off with the head unit up and back on, and later lets the head unit sleep and resume
+    Then the stick evidence holds the startup configuration, the gate logs and the owner's display observations
+    And it holds the Park getter invocation times and the ACC broadcast history
+    And it holds any "discarded", "ACC registration failed" or "ignored" records
+    And it shows the gate never blocked video across the ADM changes, the sleep or the resume
 
   @normal @AIR-022 @AIR-037 @AT-22 @AT-37 @OD-48
   Scenario: Audio keeps playing and video returns by itself
@@ -68,7 +104,16 @@ Feature: The parking gate on the owner's head unit
     Given the receiver package is installed on the owner's unit
     When the receiver starts, blocks and recovers once
     Then the stick evidence holds the start record and one record per gate change
+    And each gate-change record matches the gear and display the owner observed at that time
     And the owner saw no on-screen message about the parking check
+
+  @normal @AIR-026 @AT-26 @OD-71
+  Scenario: After a restart with a changed flag, the start record gives the previous value as unknown
+    Given the receiver ran on the owner's unit with the parking check on
+    When the owner changes the installed receiver.conf to hold "video.require_park=false" and restarts the receiver
+    Then the stick evidence holds the start record giving the parking check as off, as the startup value
+    And that record gives the previous value as unknown
+    And the recorded gate changes match the configuration change and the gear and display the owner observed
 
   @normal @AIR-027 @AT-27 @OD-22
   Scenario: Nothing mirrored appears on the HUD
@@ -100,14 +145,26 @@ Feature: The parking gate on the owner's head unit
     Then the stick evidence holds each regulation state with the gate state beside it
     And untested regulation states are listed as unverified
 
-  @boundary @AIR-039 @AT-39 @OD-57
+  @boundary @AIR-039 @AT-39 @OD-57 @OD-73 @OD-82
   Scenario: The logs stay within 5 MiB on the unit
-    Given the receiver has logged enough to reach the cap
-    Then the stick evidence holds timestamped listings of the log folder showing two files, at most 5242880 bytes together, and the oldest file deleted
+    Given the receiver has logged enough to rotate its current log file more than once
+    Then the stick evidence holds timestamped listings of the log folder with each file's size and the byte total
+    And they show each rotation happening at or before 2621440 bytes
+    And they show no file ever above 2621440 bytes
+    And they show the older file deleted at each rotation
+    And they show the two files never above 5242880 bytes together
+    And an oversized-record drop is listed as unexercised unless the unit logged a "record too large" line
 
   @failure @AIR-040 @AT-40 @OD-58
   Scenario: A logging failure on the unit shows one notice and doesn't change the gate
     Given the receiver is mirroring parked, with the parking check on
     When logging fails twice in one app start, then again after a restart
-    Then the owner saw one notice before the restart and one after
+    Then the owner saw one logging-failure notice before the restart and one after
     And the evidence, kept outside the failed log, shows the gate unchanged
+
+  @failure @AIR-019 @AIR-040 @AT-19 @AT-40 @OD-101 @OD-102
+  Scenario: On the unit, an ACC registration failure and a logging failure each show their own notice
+    Given an app start on the owner's unit, with the parking check on, in which ACC registration failed
+    When logging also fails, more than once, in that app start
+    Then the owner saw exactly one registration-failure notice and exactly one logging-failure notice in that app start
+    And the evidence, kept outside the failed log, shows video blocked throughout that app start
