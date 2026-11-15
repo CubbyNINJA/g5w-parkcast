@@ -27,10 +27,24 @@ of 1 is remapped before sending.
   out! Shut down Start"). A later start is then a fresh boot or QuickBoot restore, not a resume, so
   the receiver also treats its own process start as a resume.
 
+## sleep-probe results (2026-11-15 16:24, 260206 CA, a 30-second off cycle)
+
+Run 1 at 16:24:47 (uptime 30.15 s), car on; the owner then switched the car off for about 30 s and
+on again; run 2 at 16:25:58 (uptime 100.80 s). Output in `NEMESIS-diag/sleep-probe/` on the stick.
+
+| Evidence | What it shows |
+|---|---|
+| `run1`/`run2` `uptime.txt`, `wallclock.txt` | Uptime advanced 70.65 s over 71 s of clock time: **the unit stayed up**; no reboot or QuickBoot. |
+| `run2/broadcasts.txt` (broadcast history) | `EXTRA_ACC_STATUS` 5→0 at start-up, then **0→2** when the car was switched off, then **2→0** when it was switched on. No 6, 7 or 255. |
+| `run2/logcat-power.txt` | 16:25:46.640 `onAccOnRequest (reason = ACCON(0x0))`, `ACC Status Changed : ADM(0x2) -> ACCON(0x0)`, `Broadcasting ACC Status (not buffering) : ACCON(0x0)`, delivered at once to stock receivers. The off transition had scrolled out of the log buffer; the broadcast history records it. |
+| `getPowerStatus.txt`, `isPreparingSystemOff.txt` | Both read 0 in both runs, taken with the car on. |
+
+So switching the car off for a short time puts the head unit into **ADM (2)**: the car is off but the
+unit stays up. A longer off presumably goes on to 7 or 255 and a full shutdown (not tested).
+
 ## Not verified
 
-- The ACC state sequence on the unit for a short and a long off cycle, and whether uptime resets
-  after a long one. The sleep-probe records both.
+- The ACC sequence for a long off cycle (several minutes), and whether the unit then shuts down.
 - Whether the broadcast is declared protected (`framework-res.apk` wasn't available). That would only
   limit who can send it, not who can receive it.
 - The `PRE_QUICKBOOT` / `POST_QUICKBOOT` sender.
