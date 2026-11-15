@@ -46,8 +46,7 @@ A read-only probe (`tools/unit-probes/hud-probe`) ran on the owner's unit at 08:
 2026-11-15, on build CVEV.CAN.0000.V015.011.260206 with both guards passed (`probe.log` L2-3). It
 read the HUD getters 308 to 327 and dumped the USM, cluster, display and SurfaceFlinger services,
 the framebuffers and the display props. The output is in `NEMESIS-diag/hud-probe/` on the stick;
-the line numbers below refer to those files. They were read by one reader and haven't been
-re-checked against the files by a second.
+the line numbers below refer to those files, and were spot-checked against them a second time.
 
 ### Only one display exists
 
@@ -76,7 +75,7 @@ The HUD getters run to 327. The ones after 321 are `InSportMode`, `Speed`, `ARLe
 
 ### A second display service
 
-`service list` shows `telechips_display` (`ITelechipsDisplayManager`, `service-list.txt` L10) as
+`service list` shows `telechips_display` (`ITelechipsDisplayManager`, `service-list.txt` L11) as
 well as `display`. The props suggest it handles the chip's external video output, and nothing is
 connected there (`tcc.extenddisplay.detected [0]`, `props-hud-display.txt` L10). It wasn't
 dumped.

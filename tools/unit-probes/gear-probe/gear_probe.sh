@@ -4,7 +4,9 @@
 # only: getGearStatusInfo (transaction 14) and getParkBrakeStatus (7), numbers parsed from this
 # unit's own automotive.odex. They run only if the service identifies as com.hkmc.bcm.IBCMService
 # AND the build is exactly 260206; otherwise nothing is called. Also keeps the gear-related logcat
-# lines and a dumpsys of the BCM service before and after. Sends nothing to the car.
+# lines and a dumpsys of the BCM service before and after. Commands nothing, but transaction 14
+# makes the BCM service send a REQ_GEAR_STATUS request to the MICOM; neither call returns a value
+# (docs/evidence/GEAR_PROBE_FINDINGS.md).
 #
 # DO IT PARKED: car on, stationary, foot firmly on the brake the whole time. Then follow the toasts
 # (or a stopwatch from the moment you tap Yes):
