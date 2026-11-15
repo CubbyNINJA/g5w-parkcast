@@ -253,8 +253,14 @@ class SubprocessLauncher:
 
 
 class SystemClock:
+    """Seconds since this clock was made, just before the run starts, so a run's times and the
+    verdict's "ended at second T" read as time into the run. The run folder's name carries the date."""
+
+    def __init__(self):
+        self._zero = time.monotonic()
+
     def now(self) -> float:
-        return time.time()
+        return round(time.monotonic() - self._zero, 3)
 
     def sleep(self, seconds: float) -> None:
         time.sleep(max(seconds, 0))
