@@ -15,7 +15,7 @@ FEATURES = ROOT / "specs" / "features"
 REQS = ROOT / "docs" / "spec" / "REQUIREMENTS.md"
 OUT = ROOT / "docs" / "spec" / "TRACEABILITY.md"
 
-TIERS = {"offline", "pc", "unit"}
+TIERS = {"offline", "host", "pc", "unit"}
 KINDS = {"normal", "failure", "boundary"}
 
 

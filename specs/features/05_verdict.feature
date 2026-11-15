@@ -1,95 +1,112 @@
 @S1
 Feature: GO, NO-GO or INCONCLUSIVE, with the reason and the lines behind it
   The evaluator gives each session a verdict and the run an overall one. Only an H.264 mirroring
-  stream that actually started is GO. Damaged evidence is never GO (AIR-010, AIR-011; OD-09,
-  OD-10, OD-12, OD-13, OD-17 to OD-19).
+  stream that actually started is GO. Damaged evidence is never GO (AIR-009 to AIR-011,
+  AIR-029; OD-09, OD-10, OD-12, OD-13, OD-17 to OD-19, OD-25, OD-26).
 
-  @offline @normal @AIR-010 @AIR-011 @AT-10 @AT-11
+  @offline @normal @AIR-010 @AIR-011 @AIR-029 @AT-10 @AT-11 @AT-29 @OD-25
   Scenario Outline: A single complete session's verdict
-    Given a complete session in which <what happened>
+    Given a complete log with one session in which <what happened>
     When the evaluator judges the run
     Then the session's verdict is <verdict> with the reason "<reason>"
     And the run's verdict is <verdict>
     And the verdict cites the log lines it rests on
 
     Examples:
-      | what happened                                        | verdict      | reason                               |
-      | an iPhone connected and H.264 mirroring started      | GO           | H.264 mirroring started              |
-      | an iPhone connected and requested HEVC               | NO-GO        | HEVC requested                       |
-      | an iPhone connected and no video stream started      | NO-GO        | connected but no H.264 mirroring     |
-      | no iPhone ever connected                             | INCONCLUSIVE | no iPhone connected                  |
+      | what happened                                    | verdict | reason                           |
+      | H.264 mirroring started                          | GO      | H.264 mirroring started          |
+      | the iPhone requested HEVC                        | NO-GO   | HEVC requested                   |
+      | no video stream arrived                          | NO-GO   | connected but no H.264 mirroring |
+      | only mirroring setup and the connection were logged | NO-GO | connected but no H.264 mirroring |
+
+  @offline @boundary @AIR-010 @AT-10 @OD-26
+  Scenario: A run with no session is INCONCLUSIVE because no iPhone connected
+    Given a complete log in which no iPhone ever connected
+    When the evaluator judges the run
+    Then the run's verdict is INCONCLUSIVE with the reason "no iPhone connected"
+    And no session verdict is listed
 
   @offline @failure @AIR-010 @AT-10
   Scenario Outline: Things short of a started H.264 stream are never GO
-    Given a complete session in which <what happened>
+    Given a complete log in which <what happened>
     When the evaluator judges the run
     Then the run's verdict is not GO
 
     Examples:
-      | what happened                                              |
-      | an iPhone connected but sent nothing else                  |
-      | only audio played                                          |
-      | the receiver advertised H.264 and no iPhone connected      |
+      | what happened                                         |
+      | an iPhone connected but sent nothing else             |
+      | only audio played                                     |
+      | the receiver advertised H.264 and no iPhone connected |
 
   @offline @boundary @AIR-010 @AT-10 @OD-19
   Scenario: A session that requests HEVC, then starts H.264, is GO with the request noted
-    Given a complete session in which an iPhone requested HEVC and then H.264 mirroring started
+    Given a complete log with one session in which the iPhone requested HEVC and then H.264 mirroring started
     When the evaluator judges the run
     Then the session's verdict is GO with the reason "H.264 mirroring started"
     And the reason notes the earlier HEVC request
 
-  @offline @normal @AIR-010 @AT-10 @OD-12
-  Scenario Outline: The run is GO if any complete session is GO, whatever the order
-    Given complete sessions with verdicts <sessions>
-    When the evaluator judges the run
-    Then the run's verdict is GO
-    And every session's verdict is listed
-
-    Examples:
-      | sessions                    |
-      | GO, NO-GO                   |
-      | NO-GO, GO                   |
-      | INCONCLUSIVE, NO-GO, GO     |
-
-  @offline @boundary @AIR-010 @AT-10 @OD-18
-  Scenario: NO-GO and INCONCLUSIVE sessions with no GO make the run NO-GO
-    Given complete sessions with verdicts INCONCLUSIVE, NO-GO
-    When the evaluator judges the run
-    Then the run's verdict is NO-GO
-    And every session's verdict is listed
-
-  @offline @failure @AIR-009 @AIR-010 @AT-09 @AT-10 @OD-17
-  Scenario: A damaged log is INCONCLUSIVE even when one session looks GO
-    Given a complete session in which an iPhone connected and H.264 mirroring started
-    And the log as a whole is truncated
-    When the evaluator judges the run
-    Then the run's verdict is INCONCLUSIVE with the reason "evidence error"
-    And the limitation "truncated" is named
-
-  @offline @failure @AIR-009 @AT-09 @OD-13
-  Scenario: A session whose codec can't be identified is an evidence error
-    Given a complete session in which an iPhone connected and mirroring started with no codec line
+  @offline @failure @AIR-009 @AIR-029 @AT-09 @AT-29 @OD-25
+  Scenario: A stream that arrived with no codec line is an evidence error
+    Given a complete log with one session in which a video stream arrived and no codec line followed
     When the evaluator judges the run
     Then the session's verdict is INCONCLUSIVE with the reason "evidence error"
     And the limitation "codec not identified" is named
+    And the run's verdict is INCONCLUSIVE
 
-  @offline @normal @AIR-008 @AIR-010 @AT-08 @AT-10 @OD-09 @OD-10
-  Scenario Outline: The owner's notes are kept but never change a verdict
-    Given a complete session in which an iPhone connected and requested HEVC
-    And the owner's note "<note>" is "<value>"
+  @offline @normal @AIR-010 @AT-10 @OD-12 @OD-18 @OD-26
+  Scenario Outline: The run's verdict comes from its sessions, whatever their order
+    Given an error-free run with complete sessions whose verdicts are <sessions>
     When the evaluator judges the run
-    Then the run's verdict is NO-GO
-    And the note "<note>" is kept with the value "<value>"
+    Then the run's verdict is <verdict>
+    And every session's verdict is listed unchanged
 
     Examples:
-      | note          | value |
-      | sound played  | yes   |
-      | sound played  | no    |
-      | YouTube check | works |
+      | sessions                   | verdict      |
+      | GO, NO-GO                  | GO           |
+      | NO-GO, GO                  | GO           |
+      | INCONCLUSIVE, NO-GO, GO    | GO           |
+      | GO, INCONCLUSIVE           | GO           |
+      | INCONCLUSIVE, GO           | GO           |
+      | GO, GO                     | GO           |
+      | NO-GO, INCONCLUSIVE        | NO-GO        |
+      | INCONCLUSIVE, NO-GO        | NO-GO        |
+      | NO-GO, NO-GO               | NO-GO        |
+      | INCONCLUSIVE               | INCONCLUSIVE |
+      | INCONCLUSIVE, INCONCLUSIVE | INCONCLUSIVE |
+
+  @offline @failure @AIR-009 @AIR-010 @AT-09 @AT-10 @OD-17
+  Scenario Outline: Whole-log damage overrides otherwise decisive session evidence
+    Given a run containing a complete session whose verdict is <session verdict>
+    And the log as a whole is <damage>
+    When the evaluator judges the run
+    Then the run's verdict is INCONCLUSIVE with the reason "evidence error"
+    And the limitation "<damage>" is named
+
+    Examples:
+      | session verdict | damage            |
+      | GO              | truncated         |
+      | GO              | partly unreadable |
+      | NO-GO           | truncated         |
+      | NO-GO           | partly unreadable |
+
+  @offline @boundary @AIR-008 @AIR-010 @AT-08 @AT-10 @OD-09 @OD-10
+  Scenario Outline: Changing an owner observation changes neither verdict level
+    Given a complete synthetic run with one session whose verdict is <verdict>
+    When only the "<note>" observation changes from "<before>" to "<after>"
+    Then the session verdict remains <verdict>
+    And the run verdict remains <verdict>
+    And the updated observation is retained
+
+    Examples:
+      | verdict | note          | before | after |
+      | GO      | sound played  | yes    | no    |
+      | NO-GO   | sound played  | no     | yes   |
+      | GO      | YouTube check | works  | fails |
+      | NO-GO   | YouTube check | fails  | works |
 
   @offline @boundary @AIR-011 @AT-11
   Scenario: A verdict that rests on something missing names how far the log was read
-    Given a complete session in which an iPhone connected and no video stream started
+    Given a complete log with one session in which no video stream arrived
     And the run ended at second 600 by the timeout
     When the evaluator judges the run
     Then the reason states the log was read to its last line and the run ended at second 600

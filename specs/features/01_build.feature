@@ -22,15 +22,16 @@ Feature: A checked, pinned UxPlay build on this PC
     And the build is never invoked
 
     Examples:
-      | item                                  |
-      | the UCRT64 environment                |
-      | mingw-w64-ucrt-x86_64-cmake           |
-      | mingw-w64-ucrt-x86_64-gcc             |
-      | mingw-w64-ucrt-x86_64-libplist        |
-      | mingw-w64-ucrt-x86_64-gstreamer       |
+      | item                                   |
+      | the UCRT64 environment                 |
+      | mingw-w64-ucrt-x86_64-cmake            |
+      | mingw-w64-ucrt-x86_64-ninja            |
+      | mingw-w64-ucrt-x86_64-gcc              |
+      | mingw-w64-ucrt-x86_64-libplist         |
+      | mingw-w64-ucrt-x86_64-gstreamer        |
       | mingw-w64-ucrt-x86_64-gst-plugins-base |
-      | git                                   |
-      | a GStreamer H.264 decoder             |
+      | git                                    |
+      | a GStreamer H.264 decoder              |
 
   @offline @normal @AIR-002 @AT-02
   Scenario: A successful build records its provenance and pins the commit
@@ -55,6 +56,19 @@ Feature: A checked, pinned UxPlay build on this PC
     And no executable is recorded as this build's output
     And the earlier executable is not selected for a test run
 
+  @offline @failure @AIR-002 @AT-02
+  Scenario Outline: An interrupted build can't supply a verified executable
+    Given a build that has written a partial executable
+    When the build ends by <ending>
+    Then the failure is reported
+    And the partial executable is not recorded as a successful build output
+    And it can't be selected for a test run
+
+    Examples:
+      | ending               |
+      | a compiler failure   |
+      | a keyboard interrupt |
+
   @offline @failure @AIR-002 @AT-02 @OD-20
   Scenario: master that is no longer UxPlay 1.74 stops the build and asks the owner
     Given upstream master is at commit "2222222222222222222222222222222222222222" with version "1.75"
@@ -62,10 +76,12 @@ Feature: A checked, pinned UxPlay build on this PC
     Then it stops before building
     And it asks the owner which version to build, naming version "1.75"
 
-  @pc @normal @AIR-001 @AIR-002 @AT-01 @AT-02
-  Scenario: The real build on this PC
+  @host @normal @AIR-001 @AIR-002 @AT-01 @AT-02
+  Scenario: The real build on this PC, built twice from clean directories
     Given this PC's MSYS2 UCRT64 environment
     When the prerequisite check runs and its inventory is saved
     And the build procedure runs from a clean build directory
-    Then the build succeeds with UxPlay version "1.74"
-    And the provenance is saved, including the executable's SHA-256
+    And it is repeated from a second clean build directory at the recorded commit
+    Then both builds report UxPlay version "1.74" at the same commit
+    And each build's provenance is saved with its commit, dependency versions, build commands, executable path and SHA-256
+    And neither build tree is inside version control
