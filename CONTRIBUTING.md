@@ -41,7 +41,8 @@ No production code or step definition without a reviewed scenario.
 ## 3. Git (OD-90)
 
 - Commit often, each commit one coherent change.
-- Push at milestones: requirements folded in, scenarios reviewed, a green suite.
+- Publish the branch after each milestone (OD-110): requirements folded in, scenarios reviewed, step definitions
+  written, a green suite.
 - Each slice works on its own branch (`s2-parking-gate`, …) and is merged into `main` when the slice
   is finished. `main` holds finished slices.
 - Agent commits end with their `Co-Authored-By:` trailer.

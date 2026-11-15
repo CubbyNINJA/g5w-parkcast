@@ -62,7 +62,8 @@ gate is plain Java, compiled by the tests with `javac` from a JDK 17 (OD-66).
 ## Git (OD-90)
 
 - **Commit often**, one coherent change per commit, with the suite in a known state.
-- **Push at milestones**: a slice's requirements folded in, its scenarios reviewed, its suite green.
+- **Publish the branch after each milestone** (owner, OD-110): push the slice branch right after a slice's
+  requirements are folded in, its scenarios reviewed, its step definitions written, or its suite turns green.
 - **Merge at the end of a slice**: `main` holds finished slices; each slice works on its own
   branch (for example `s2-parking-gate`) and is merged into `main` when it's done.
 - The repository is public. Never commit OEM binaries, UxPlay builds, `runs/`, `.astra/`, or
