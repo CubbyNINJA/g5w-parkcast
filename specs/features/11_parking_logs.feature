@@ -788,6 +788,18 @@ Feature: Regulation evidence, the log cap and logging failures
     And exactly one logging-failure notice add call was made, at exactly 3000 ms
     And it was removed at exactly 8000 ms
 
+  @offline @normal @AIR-041 @AT-41 @OD-122
+  Scenario: A held notice shown when focus returns is not shown again after a later cover
+    Given the parking check is on, on a supported build
+    And the receiver's window loses focus at 500 ms
+    When a log write fails at 1000 ms
+    And the receiver's window gains focus at 3000 ms
+    And the receiver's window loses focus at 5000 ms
+    And the receiver's window gains focus at 8000 ms
+    And the receiver runs for 60000 ms
+    Then exactly one logging-failure notice add call was made, at exactly 3000 ms
+    And no logging-failure notice attempt was made after 3000 ms
+
   @offline @failure @AIR-041 @AT-41 @OD-107 @OD-122
   Scenario: A retry that falls due while covered is made when focus returns
     Given the parking check is on, on a supported build

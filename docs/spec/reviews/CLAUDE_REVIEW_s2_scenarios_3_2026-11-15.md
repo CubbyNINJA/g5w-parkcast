@@ -108,3 +108,9 @@ No behaviour changed.
   and 700 ms". Runs include time N (09:13) and the 200 ms schedule from the 300 ms re-read puts a call at 700.
 - `09_parking_gate.feature:687`: the run is now 6000 ms, not 2000 ms, so the removal calls at exactly 5000 ms
   that the scenario asserts can happen within it.
+- `11_parking_logs.feature:792` (new): "A held notice shown when focus returns is not shown again after a later
+  cover", added because the S2 mutation check found that a held notice's attempt could be made again after a second
+  cover and uncover with no scenario failing (AIR-041(b), AT-41, OD-122). It passes on the gate and fails when the
+  held marker isn't cleared.
+- Noted for the next review: `11_parking_logs.feature:901`'s audio and connection comparison can't fail, because that
+  scenario never makes a mirroring session active.
