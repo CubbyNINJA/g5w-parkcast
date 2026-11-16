@@ -40,6 +40,8 @@ public final class World {
     public long ranUntil = -1;
     /** The last Park getter call a step named by its start time (for "the call after it"). */
     public long lastAnchor = -1;
+    /** Set by a step that stands for an install: "the installed receiver.conf holds X" then checks, not sets. */
+    public boolean confIsOutcome;
     /** Index into {@code screen.clears} where the current start's clears begin. */
     private int clearsMark;
 

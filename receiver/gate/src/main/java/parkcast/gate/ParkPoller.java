@@ -22,11 +22,20 @@ public final class ParkPoller {
     /** A reading older than this is unavailable (AIR-019(b)). */
     static final long MAX_AGE_MS = 2000L;
 
+    /*
+     * Causes other than a returned Park reading name themselves and no Park value or receipt time
+     * (AIR-026(d)).
+     */
+    static final String TIMEOUT_CAUSE = "the " + PERIOD_MS + " ms timeout";
+    static final String AGE_CAUSE = "a reading older than " + MAX_AGE_MS + " ms";
+    static final String SLEEP_CAUSE = "sleep entry";
+    static final String FAILED_CAUSE = "a failed Park getter call";
+
     /** Told whenever what {@link #fresh()} returns may have changed, with the cause. */
     public interface Listener {
         /**
          * @param reading true when the cause is a returned Park reading
-         * @param cause the cause: a reading's value and receipt time, or another cause
+         * @param cause the cause: a returned reading's value and receipt time, or another cause by itself
          */
         void changed(boolean reading, String cause);
     }
@@ -76,7 +85,7 @@ public final class ParkPoller {
         if (pending != null) pending.cancelTick();
         boolean had = available;
         dropReading();
-        if (had) notifyChanged(false, "sleep");
+        if (had) notifyChanged(false, SLEEP_CAUSE);
     }
 
     /** Resume: re-read at once, or as soon as a call from before the sleep returns (AIR-019(d)). */
@@ -145,7 +154,7 @@ public final class ParkPoller {
             c.timedOut = true;
             boolean had = available;
             dropReading();
-            if (had) notifyChanged(false, "timeout");
+            if (had) notifyChanged(false, TIMEOUT_CAUSE);
         } else if (pending == null) {
             invoke();
         }
@@ -166,7 +175,7 @@ public final class ParkPoller {
             c.cancelTick();
             boolean had = available;
             dropReading();
-            if (had) notifyChanged(false, "timeout");
+            if (had) notifyChanged(false, TIMEOUT_CAUSE);
             invoke();
             return;
         }
@@ -183,12 +192,18 @@ public final class ParkPoller {
                     ageTask = null;
                     if (!fresh() && available) {
                         available = false;
-                        notifyChanged(false, "reading older than 2000 ms");
+                        notifyChanged(false, AGE_CAUSE);
                     }
                 }
             });
         }
-        if (was != fresh() || !was) notifyChanged(true, "reading value=" + describe(ok, v) + " received=" + now);
+        if (was != fresh() || !was) {
+            if (ok) {
+                notifyChanged(true, "the Park reading of " + v + " received at " + now + " ms");
+            } else {
+                notifyChanged(false, FAILED_CAUSE);
+            }
+        }
     }
 
     /** A reply that arrived asleep, or after resume from a call started before the sleep (AIR-019(g)). */

@@ -526,6 +526,8 @@ public final class Fakes {
         public final Map<String, Long> sizes = new LinkedHashMap<>();
         /** An append whose text contains this fails. */
         public String failOn;
+        /** The first append whose text contains this fails; it is then cleared, so later appends succeed. */
+        public String failOnceOn;
         public int rotations, deletions, failures;
 
         public Logs(VirtualScheduler s) {
@@ -542,6 +544,11 @@ public final class Fakes {
         public void append(String name, byte[] b) throws IOException {
             String text = new String(b, StandardCharsets.UTF_8);
             if (failOn != null && text.contains(failOn)) {
+                failures++;
+                throw new IOException("synthetic write failure");
+            }
+            if (failOnceOn != null && text.contains(failOnceOn)) {
+                failOnceOn = null;
                 failures++;
                 throw new IOException("synthetic write failure");
             }

@@ -12,7 +12,8 @@ import parkcast.gate.port.Frame;
  * {@code ro.build.product} starts with {@code CVEV.}; a missing or unreadable property, or any other value,
  * leaves the gate blocked even on a {@code 1}. With the check off, video is never blocked.
  *
- * <p>Each change of state is logged with the previous and resulting states and its cause. A change to
+ * <p>Each change of state is logged as a transition with the previous and resulting states and its cause:
+ * a returned Park reading is named by its value and receipt time, any other cause by itself. A change to
  * blocked clears the display at once, and no frame is shown while blocked, so a queued frame never appears.
  * The stock regulation state and the ACC broadcast never decide the gate directly: sleep reaches the gate
  * only through the poller, which holds no reading while asleep.
@@ -58,7 +59,7 @@ public final class ParkingGate implements ParkPoller.Listener {
     /** Shows the frame only while permitted; a frame that arrives while blocked is dropped. */
     public void onFrame(Frame f) {
         if (!started) return;
-        evaluate("reading older than " + ParkPoller.MAX_AGE_MS + " ms");
+        evaluate(ParkPoller.AGE_CAUSE);
         if (permitted) display.show(f);
     }
 
@@ -67,14 +68,17 @@ public final class ParkingGate implements ParkPoller.Listener {
         evaluate(cause);
     }
 
-    /** Recomputes the state; on a change, logs the transition and clears the display when now blocked. */
+    /**
+     * Recomputes the state; on a change, logs the transition and clears the display when now blocked. Every
+     * change is a transition, the first after start included (AIR-026(c)).
+     */
     private void evaluate(String cause) {
         if (!started) return;
         boolean now = !config.requirePark() || (supported && poller.fresh());
         if (now == permitted) return;
         permitted = now;
         if (!now) display.clear();
-        log.record("gate prev=" + state(!now) + " new=" + state(now) + " cause=" + cause);
+        log.record("gate transition prev=" + state(!now) + " new=" + state(now) + " cause=" + cause);
     }
 
     static String state(boolean permitted) {

@@ -47,7 +47,23 @@ public class CommonSteps {
 
     // ------------------------------------------------------------ receiver.conf and build
 
+    /**
+     * Sets receiver.conf. After a step that stands for an install ({@code w.confIsOutcome}), the same text is
+     * a check: the installed file holds exactly that text and is readable.
+     */
     @Given("the installed receiver.conf holds {string}")
+    public void confHoldsStep(String text) {
+        if (!w.confIsOutcome) {
+            confHolds(text);
+            return;
+        }
+        String want = text.replace(" ; ", "\n");
+        if (w.config.missing || w.config.unreadable || !want.equals(w.config.text))
+            throw new AssertionError("the installed receiver.conf is " + (w.config.missing ? "missing"
+                    : w.config.unreadable ? "unreadable" : "holding \"" + w.config.text + "\"")
+                    + ", expected it to hold \"" + want + "\"");
+    }
+
     public void confHolds(String text) {
         w.config.missing = false;
         w.config.unreadable = false;
@@ -107,8 +123,10 @@ public class CommonSteps {
     }
 
     /**
-     * Before the start this sets receiver.conf; after it, it checks the start's records: off means a record
-     * contains "parking check off", on means none does and the start record gives a reason.
+     * Before the start this sets receiver.conf; after it, it checks the current start's start record (the one
+     * record beginning "start "): it gives {@code check=on} or {@code check=off} and a reason. On also means no
+     * record of the start says "parking check off". Off does not require that record, because writing it may
+     * fail (AIR-025(c)); the start record is the observable for the flag (S2_GATE).
      */
     @Given("^the parking check is (on|off)$")
     public void parkingCheckIs(String state) {
@@ -118,14 +136,19 @@ public class CommonSteps {
             return;
         }
         w.settle();
-        boolean offRecord = false, reason = false;
+        List<Fakes.Line> starts = new ArrayList<>();
+        boolean offRecord = false;
         for (Fakes.Line l : w.lines()) {
+            String body = l.text.replaceFirst("^t=\\d+ ", "");
+            if (body.startsWith("start ")) starts.add(l);
             if (l.text.contains("parking check off")) offRecord = true;
-            if (l.text.contains("reason=")) reason = true;
         }
+        if (starts.size() != 1) throw new AssertionError("expected exactly one start record: " + w.lines());
+        String start = " " + starts.get(0).text + " ";
+        if (!start.contains(" check=" + state + " "))
+            throw new AssertionError("the start record does not give check=" + state + ": " + starts.get(0));
+        if (!start.contains(" reason=")) throw new AssertionError("the start record gives no reason: " + starts.get(0));
         if (on && offRecord) throw new AssertionError("a record says \"parking check off\": " + w.lines());
-        if (!on && !offRecord) throw new AssertionError("no record says \"parking check off\": " + w.lines());
-        if (!reason) throw new AssertionError("no start record with \"reason=\": " + w.lines());
     }
 
     // ------------------------------------------------------------ starting and running

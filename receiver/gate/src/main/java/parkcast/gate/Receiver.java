@@ -83,7 +83,11 @@ public final class Receiver {
         this.regulationLog = new RegulationLog(regulation, log);
     }
 
-    /** Reads the flag, sets and logs the initial gate state, and registers the {@code REVERSE_ON} receiver. */
+    /**
+     * Reads the flag, sets and logs the initial gate state, and registers the {@code REVERSE_ON} receiver.
+     * The start record gives the flag as the startup value with the previous value unknown (AIR-026(b)): no
+     * state is read from an earlier run or its log. The {@code reason=} field goes last because it holds spaces.
+     */
     public void onCreate() {
         if (created || exited) return;
         created = true;
@@ -91,9 +95,9 @@ public final class Receiver {
         boolean on = flag.requirePark();
         if (!on) log.record("parking check off");
         gate.start();
-        log.record("start check=" + onOff(on) + " gate=" + ParkingGate.state(gate.permitted())
-                + " reason=" + flag.reason());
-        log.record("flag prev=unknown new=" + onOff(on) + " cause=startup value");
+        log.record("start check=" + onOff(on) + " prev=unknown as=the startup value gate="
+                + ParkingGate.state(gate.permitted()) + " reason=" + flag.reason());
+        log.record("flag prev=unknown new=" + onOff(on) + " cause=the startup value");
         regulationLog.start();
         cover.register();
         poller.start();
