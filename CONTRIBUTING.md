@@ -10,9 +10,10 @@ updates the docs that describe it in the same commit (OD-90).
 uv venv --python 3.12 .venv
 uv pip install --python .venv/Scripts/python.exe -r requirements-dev.txt
 .venv/Scripts/python -m pytest
+./gradlew test        # S2, Cucumber-JVM
 ```
 
-You also need a JDK 17 for the S2 gate tests. Git must keep files LF: `.gitattributes` does this,
+`./gradlew test` needs a JDK 17 in `JAVA_HOME`; the wrapper fetches Gradle and the pinned jars. Git must keep files LF: `.gitattributes` does this,
 and on Windows run `git config core.autocrlf input` in your clone.
 
 ## 2. The loop (spec first, always)
@@ -32,7 +33,8 @@ No production code or step definition without a reviewed scenario.
    `python tools/trace_specs.py`.
 4. **Coverage review.** The reviewer role checks the scenarios against the requirements. Save the
    review, apply its findings, and raise anything that needs the owner as an `AMB`.
-5. **Tests first.** Write step definitions in `tests/steps/` and watch them fail for the right reason.
+5. **Tests first.** Write step definitions (S1 in `tests/steps/`, S2 in `receiver/gate/src/test/java`) and
+   watch them fail for the right reason.
    Oracles must be independent of the code under test: fakes record what was actually asked of
    them, and the steps compare against the numbers in the scenario.
 6. **Code** until the scenarios pass. Then mutate the new behaviour (break it on purpose and check

@@ -23,7 +23,8 @@ plain-Java parking gate.
 
 ## Roadmap
 
-1. **S2, the parking gate** (now): step definitions, then the gate as plain Java, tested on the PC.
+1. **S2, the parking gate** (now): Cucumber-JVM step definitions, then the gate as plain Java 7, tested on
+   the PC (OD-131 to OD-135).
 2. **The receiver on the head unit** (next, OD-99): cross-build UxPlay's AirPlay core for the unit
    (Android 4.4, ARMv7) and show mirrored video through its hardware H.264 decoder. This is the
    biggest untested risk.
@@ -46,7 +47,9 @@ then tests, then code. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `docs/spec/TRACEABILITY.md` | Generated: which scenarios cover which requirements |
 | `docs/evidence/` | Facts from the head unit and PC tests that the specs rely on, redacted |
 | `specs/features/` | Gherkin scenarios; tag rules in `specs/README.md` |
-| `tests/` | pytest-bdd bindings and step definitions |
+| `tests/` | pytest-bdd bindings and step definitions for S1, plus the tag and traceability checks |
+| `receiver/gate/` | The parking gate, plain Java 7 (`src/main/java`), and its Cucumber-JVM S2 steps (`src/test/java`) |
+| `settings.gradle`, `gradlew` | The Gradle wrapper build for the Java code |
 | `tools/airplay_s1/`, `tools/s1.py` | The S1 PC test: build UxPlay, run it, analyse and judge the log |
 | `tools/unit-probes/` | Read-only probes run on the head unit from a USB stick |
 | `tools/astra/` | Runner and role prompts for the external requirements author and reviewer |
@@ -58,12 +61,14 @@ then tests, then code. See [CONTRIBUTING.md](CONTRIBUTING.md).
 ```bash
 uv venv --python 3.12 .venv
 uv pip install --python .venv/Scripts/python.exe -r requirements-dev.txt
-.venv/Scripts/python -m pytest          # offline scenarios (synthetic, no hardware)
+.venv/Scripts/python -m pytest          # S1 offline scenarios, plus tag and traceability checks
 .venv/Scripts/python tools/trace_specs.py --check
+./gradlew test                          # S2 offline scenarios (Cucumber-JVM), needs a JDK 17
 ```
 
 The S1 PC test (`--run-pc`) needs MSYS2 with UxPlay's build dependencies and an iPhone on the same
-network; the S2 gate tests need a JDK 17 (`javac`). Head-unit (`@unit`) scenarios never run from
+network. `./gradlew test` needs a JDK 17 (set `JAVA_HOME`); the wrapper downloads Gradle and the pinned
+Cucumber jars on first use. Head-unit (`@unit`) scenarios never run from
 the PC: their evidence comes from the probes and logs on the USB stick.
 
 ## Licence

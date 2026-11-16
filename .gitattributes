@@ -6,3 +6,6 @@
 *.zip binary
 *.apk binary
 *.jar binary
+*.bat text eol=crlf
+*.jar binary
+gradlew text eol=lf

@@ -1,4 +1,4 @@
-"""Every step of every scenario, in every tier, has exactly one step definition.
+"""Every step of every pytest-bdd scenario, in every tier, has exactly one step definition (S2's steps are Java).
 
 pytest-bdd looks steps up one at a time as a scenario runs, so a scenario that fails at its first
 step hides a missing or ambiguous definition later in it. This checks them all up front, including
@@ -6,11 +6,10 @@ the @host, @pc and @unit scenarios that the default run skips.
 """
 
 import importlib
-from pathlib import Path
 
 from pytest_bdd.parser import FeatureParser
 
-FEATURES = Path(__file__).resolve().parents[1] / "specs" / "features"
+from feature_sets import FEATURES, python_features
 STEP_MODULES = ["steps.build_steps", "steps.run_steps", "steps.prompt_steps", "steps.log_steps", "steps.evidence_steps",
                 "steps.cli_steps", "steps.live_steps"]
 
@@ -26,7 +25,7 @@ def _definitions():
 
 
 def _rendered_steps():
-    for path in sorted(FEATURES.glob("*.feature")):
+    for path in python_features():
         feature = FeatureParser(str(FEATURES), path.name).parse()
         for template in feature.scenarios.values():
             contexts = [c for ex in ([template.examples] if not isinstance(template.examples, list) else template.examples)
