@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Minimal on purpose (S2_GATE.md): no permissions and no manifest receiver for REVERSE_ON. The app
+     slice adds its components here. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="parkcast.receiver">
+    <uses-sdk android:minSdkVersion="19"/>
+</manifest>

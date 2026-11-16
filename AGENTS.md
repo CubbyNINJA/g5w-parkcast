@@ -35,7 +35,8 @@ for behaviour that has no reviewed scenario. The loop is the owner's spec-first 
 5. **Apply the review before any test is written.** Fold its findings into the requirements and
    features, regenerate traceability, and note in the review file what was applied. Ask the
    owner only when a finding needs an owner decision.
-6. **Tests first.** Write step definitions in `tests/steps/`, and confirm they fail for the
+6. **Tests first.** Write step definitions (S1: Python in `tests/steps/`; S2 and later receiver
+   slices: Java in `receiver/gate/src/test/java`, OD-133), and confirm they fail for the
    right reason before writing any code.
 7. **Implement** until the scenarios pass. Then run a mutation check on the new behaviour and
    the full offline suite.
@@ -50,19 +51,24 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/Scripts/python.exe 
 .venv/Scripts/python -m pytest                 # @offline only (default)
 .venv/Scripts/python -m pytest --run-host      # adds @host: this PC's MSYS2 and repo, no iPhone
 .venv/Scripts/python -m pytest --run-pc        # adds @pc: this PC plus the owner's iPhone
+./gradlew test                                 # S2 @offline scenarios, Cucumber-JVM (JAVA_HOME = a JDK 17)
 ```
 
 Neither tier needs an elevated terminal. The S1 tools never change the firewall: Windows asks you
 to allow `uxplay.exe` the first time it listens, and each run reminds you how to remove that
 allowance afterwards (OD-31, OD-36).
 
-The tests use pytest-bdd in the project's own `.venv` (`requirements-dev.txt`). The S2 parking
-gate is plain Java, compiled by the tests with `javac` from a JDK 17 (OD-66).
+S1 uses pytest-bdd in the project's own `.venv` (`requirements-dev.txt`); `tests/feature_sets.py`
+keeps pytest-bdd off the S2 feature files. The S2 parking gate is plain Java compiled for Java 7
+(`--release 7`, so it can run on Android 4.4: no lambdas or streams in `receiver/gate/src/main`), and
+its scenarios run with Cucumber-JVM through the Gradle wrapper (OD-131 to OD-135). The tag-rule and
+traceability checks in pytest still cover every feature file.
 
 ## Git (OD-90)
 
 - **Commit often**, one coherent change per commit, with the suite in a known state.
-- **Push at milestones**: a slice's requirements folded in, its scenarios reviewed, its suite green.
+- **Publish the branch after each milestone** (owner, OD-110): push the slice branch right after a slice's
+  requirements are folded in, its scenarios reviewed, its step definitions written, or its suite turns green.
 - **Merge at the end of a slice**: `main` holds finished slices; each slice works on its own
   branch (for example `s2-parking-gate`) and is merged into `main` when it's done.
 - The repository is public. Never commit OEM binaries, UxPlay builds, `runs/`, `.astra/`, or

@@ -1,10 +1,9 @@
-"""Bind every Gherkin scenario. Tier selection happens in conftest.py."""
-
-from pathlib import Path
+"""Bind the Gherkin scenarios of the slices pytest-bdd runs (S1). S2 runs under Cucumber-JVM (OD-133).
+Tier selection happens in conftest.py."""
 
 from pytest_bdd import scenarios
 
-FEATURES = Path(__file__).resolve().parents[1] / "specs" / "features"
+from feature_sets import python_features
 
-if any(FEATURES.glob("*.feature")):
-    scenarios(str(FEATURES))
+for _feature in python_features():
+    scenarios(str(_feature))

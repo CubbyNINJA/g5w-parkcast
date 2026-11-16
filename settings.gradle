@@ -1,0 +1,4 @@
+// The Java build (OD-134): the receiver's plain-Java parking gate and its Cucumber-JVM tests (OD-133).
+// S1 and the shared tag/trace checks run under pytest; see README.md.
+rootProject.name = 'g5w-parkcast'
+include 'receiver:gate'

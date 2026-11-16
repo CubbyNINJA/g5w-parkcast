@@ -1,0 +1,46 @@
+// The parking gate (OD-131): plain Java with no Android imports, compiled for Java 7 so it can later run on
+// the head unit's Android 4.4 (OD-132). Its S2 scenarios run with Cucumber-JVM (OD-133) from specs/features.
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation platform('io.cucumber:cucumber-bom:7.20.1')
+    testImplementation platform('org.junit:junit-bom:5.11.3')
+    testImplementation 'io.cucumber:cucumber-java'
+    testImplementation 'io.cucumber:cucumber-picocontainer'
+    testImplementation 'io.cucumber:cucumber-junit-platform-engine'
+    testImplementation 'org.junit.platform:junit-platform-suite'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('compileJava') {
+    options.release = 7
+    options.compilerArgs += ['-Xlint:-options']
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('compileTestJava') {
+    options.release = 17
+    options.encoding = 'UTF-8'
+}
+
+def featuresDir = rootProject.file('specs/features')
+
+test {
+    useJUnitPlatform()
+    // Only S2's synthetic scenarios run here; @unit evidence checks come last (OD-135).
+    systemProperty 'cucumber.features', System.getProperty('cucumber.features', featuresDir.absolutePath)
+    systemProperty 'cucumber.glue', 'parkcast.gate.steps'
+    systemProperty 'cucumber.filter.tags', System.getProperty('cucumber.filter.tags', '@S2 and @offline')
+    systemProperty 'cucumber.plugin', 'summary'
+    inputs.dir(featuresDir)
+    testLogging {
+        events 'failed'
+        exceptionFormat 'short'
+    }
+}
