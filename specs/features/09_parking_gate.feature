@@ -3,9 +3,9 @@ Feature: Mirrored video only in Park, read from the stock Park getter
   With the parking check on, the receiver shows mirrored video only while an on-time reading from
   VehicleInfoManager.getGearPStatus() says Park on a supported build. It polls that getter every
   200 ms, one call at a time; a call not answered within 200 ms blocks video. Audio and the iPhone
-  connection are never touched by the gate (AIR-016 to AIR-022, AIR-024, AIR-027, AIR-037;
-  OD-23, OD-24, OD-46, OD-47, OD-51, OD-56, OD-61 to OD-64, OD-72, OD-83, OD-84, OD-87, OD-88,
-  OD-91, OD-100 to OD-105).
+  connection are never touched by the gate (AIR-016 to AIR-022, AIR-024, AIR-027, AIR-037,
+  AIR-040, AIR-041; OD-23, OD-24, OD-46, OD-47, OD-51, OD-56, OD-61 to OD-64, OD-72, OD-83, OD-84,
+  OD-87, OD-88, OD-91, OD-100 to OD-107, OD-111 to OD-116, OD-118, OD-119, OD-121, OD-122).
 
   Times are in milliseconds on a controlled clock. "Within 10 ms" means a reply received 10 ms
   after the call starts. A supported build is one whose ro.build.product starts with "CVEV.".
@@ -26,11 +26,17 @@ Feature: Mirrored video only in Park, read from the stock Park getter
   getter call started after a resume.
 
   "Registration-failure notice" and "logging-failure notice" are the two on-screen notices of
-  AIR-019(i) and AIR-040, as seen in the synthetic UI output. Their wording, when they appear, how
-  long they stay and whether a notice that fails to show is tried again are open (AMB-73, AMB-74)
-  and are not asserted; scenarios assert only that the two notices' texts differ (OD-104). With
-  the check off, a registration failure shows no registration-failure notice, and with no logging
-  fault the synthetic notice output stays empty (AIR-021(b), OD-103).
+  AIR-019(i) and AIR-040, as seen in the synthetic UI output. The registration-failure notice's text
+  is exactly "Mirroring is off: the car's power state couldn't be read. Restart the receiver from NEMESIS Manager."
+  (OD-106). The logging-failure notice's text is exactly "Receiver logging stopped working. Mirroring is unaffected."
+  (OD-112). The UI double stands in for the window manager and the toast-view factory. Unless a step
+  says otherwise it supplies gravity Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, x=0, y=Y and a
+  measured view height H, and it records every add, removal and updateViewLayout call. "Shown at S"
+  means that notice's add call returned at S ms. "An attempt fails" means the UI double threw on its
+  create, measure or add call, so no window of it exists. Unless a step says otherwise the receiver's
+  activity window has focus throughout, so it is not covered (AIR-041). With the check off, a
+  registration failure shows no registration-failure notice, and with no logging fault the synthetic
+  notice output stays empty (AIR-021(b), OD-103).
 
   Log records are matched on literal tokens (OD-104, OD-105). A record that contains "discarded"
   also contains "during sleep" or "after resume", and not the other. A record that contains
@@ -356,7 +362,7 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Then mirrored video is blocked throughout
     And the Park getter was never called
 
-  @host @normal @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-87 @OD-104
+  @offline @normal @AIR-019 @AIR-021 @AT-19 @AT-21 @OD-87 @OD-104
   Scenario: Sleep never comes from the micom power service
     Given the receiver's sources and its compiled classes
     When a static scan searches them
@@ -671,38 +677,45 @@ Feature: Mirrored video only in Park, read from the stock Park getter
       | holds "other.key=false"                                    |
       | holds "video.require_park=false ; video.require_park=true" |
 
-  @offline @failure @AIR-019 @AIR-040 @AT-19 @AT-40 @OD-101 @OD-102 @OD-104
+  @offline @failure @AIR-019 @AIR-040 @AT-19 @AT-40 @OD-101 @OD-102 @OD-106 @OD-112 @OD-118
   Scenario Outline: A registration failure whose record cannot be written shows both notices
     Given the parking check is on, on a supported build
     And ACC registration <failure> at 0 ms
     And writing the "ACC registration failed" record fails
     When the receiver runs for 2000 ms
-    Then exactly one registration-failure notice was shown
-    And exactly one logging-failure notice was shown
-    And the two notices' texts differ
+    Then exactly one registration-failure notice was shown, at 0 ms, with text exactly "Mirroring is off: the car's power state couldn't be read. Restart the receiver from NEMESIS Manager."
+    And exactly one logging-failure notice was shown, at 0 ms, with text exactly "Receiver logging stopped working. Mirroring is unaffected."
+    And each notice was added as its own window
+    And the registration-failure window has y=Y and the logging-failure window has y=Y+H
+    And each window was removed by its own removal call at exactly 5000 ms
 
     Examples:
       | failure                 |
       | throws an exception     |
       | returns no sticky state |
 
-  @offline @failure @AIR-019 @AT-19 @OD-102
+  @offline @failure @AIR-019 @AT-19 @OD-102 @OD-107 @OD-119
   Scenario Outline: Showing the registration-failure notice, or failing to show it, changes nothing
     Given the parking check is on, on a supported build
     And mirroring is active with audio playing
     And ACC registration throws an exception at 0 ms
     And the registration-failure notice <outcome>
-    When the receiver runs for 5000 ms
+    When the receiver runs for 12000 ms
     Then mirrored video is blocked throughout
     And the Park getter was never called
     And ACC registration was attempted only once
     And audio was never muted, stopped or disconnected
     And the iPhone connection was never stopped or disconnected
+    And no logging-failure notice was shown at any time
 
     Examples:
-      | outcome       |
-      | is shown      |
-      | fails to show |
+      | outcome                                   |
+      | is shown                                  |
+      | fails to show                             |
+      | fails to show and its retry is shown      |
+      | fails to show and its retry fails to show |
+      | is shown and its removal call throws      |
+      | is shown and both its removal calls throw |
 
   @offline @failure @AIR-019 @AT-19 @OD-101
   Scenario Outline: Each app start whose ACC registration fails shows its own registration-failure notice
@@ -716,6 +729,142 @@ Feature: Mirrored video only in Park, read from the stock Park getter
       | failure                 |
       | throws an exception     |
       | returns no sticky state |
+
+  @offline @failure @AIR-019 @AT-19 @OD-106 @OD-114 @OD-115 @OD-116
+  Scenario Outline: The registration-failure notice is one toast window added when registration fails
+    Given the parking check is on, on a supported build
+    And ACC registration <failure> at <t> ms
+    When the receiver runs for 60000 ms
+    Then exactly one registration-failure notice add call was made, at <t> ms
+    And that add call has window type TYPE_TOAST and a view from the toast-view factory
+    And its flags include FLAG_NOT_FOCUSABLE and FLAG_NOT_TOUCHABLE and not FLAG_KEEP_SCREEN_ON
+    And its view's text is exactly "Mirroring is off: the car's power state couldn't be read. Restart the receiver from NEMESIS Manager."
+    And no Toast.show() call, other window type, dialog, notification or activity was recorded
+    And mirrored video is blocked throughout
+
+    Examples:
+      | failure                 | t   |
+      | throws an exception     | 0   |
+      | returns no sticky state | 0   |
+      | returns no sticky state | 700 |
+
+  @offline @boundary @AIR-019 @AT-19 @OD-115 @OD-116
+  Scenario Outline: The registration-failure notice stays on screen for exactly 5000 ms
+    Given the parking check is on, on a supported build
+    And ACC registration <failure> at <t> ms
+    When the receiver runs for 12000 ms
+    Then the registration-failure notice was shown at <t> ms
+    And its window is on screen at <on> ms
+    And exactly one removal call for it was made, at exactly <off> ms
+
+    Examples:
+      | failure                 | t   | on   | off  |
+      | throws an exception     | 0   | 4999 | 5000 |
+      | returns no sticky state | 700 | 5699 | 5700 |
+
+  @offline @failure @AIR-019 @AT-19 @OD-100 @OD-116
+  Scenario: Ignored ACC broadcasts do not move the registration-failure notice's removal
+    Given the parking check is on, on a supported build
+    And ACC registration returns no sticky state at 0 ms
+    When ACC status changes to 0 at 1000 ms
+    And ACC status changes to 5 at 2000 ms
+    And an ACC broadcast with the status extra missing arrives at 3000 ms
+    And an ACC broadcast with a non-integer status extra "on" arrives at 4000 ms
+    And the receiver runs for 12000 ms
+    Then the registration-failure notice was shown at 0 ms
+    And exactly one removal call for it was made, at exactly 5000 ms
+    And no other registration-failure notice add call was made
+
+  @offline @failure @AIR-019 @AIR-041 @AT-19 @AT-41 @OD-121 @OD-122
+  Scenario: A registration failure while the window has no focus is shown when focus is first gained
+    Given the parking check is on, on a supported build
+    And the receiver's window first gains focus at 3000 ms
+    And ACC registration throws an exception at 0 ms
+    When the receiver runs for 12000 ms
+    Then no view was created, measured or added before 3000 ms
+    And exactly one registration-failure notice add call was made, at exactly 3000 ms
+    And exactly one removal call for it was made, at exactly 8000 ms
+    And mirrored video is blocked throughout
+
+  @offline @failure @AIR-019 @AT-19 @OD-107 @OD-111 @OD-113
+  Scenario Outline: A registration-failure notice that fails to show is tried once more 5000 ms later, while asleep
+    Given the parking check is on, on a supported build
+    And ACC registration <failure> at 0 ms
+    And the UI double throws on <call> for the first registration-failure notice attempt
+    When the receiver runs for 60000 ms
+    Then the first registration-failure notice attempt was made at 0 ms
+    And no registration-failure notice window exists from 0 ms until 5000 ms
+    And no registration-failure notice attempt was made from 1 ms to 4999 ms
+    And exactly one more attempt, with the same text and form, was made at exactly 5000 ms
+    And that window was removed by one removal call at exactly 10000 ms
+    And no further registration-failure notice attempt was made
+    And the Park getter was never called
+
+    Examples:
+      | failure                 | call   |
+      | throws an exception     | create |
+      | throws an exception     | add    |
+      | returns no sticky state | create |
+      | returns no sticky state | add    |
+
+  @offline @failure @AIR-019 @AT-19 @OD-107 @OD-111
+  Scenario Outline: A registration-failure notice whose retry also fails is given up
+    Given the parking check is on, on a supported build
+    And ACC registration throws an exception at 0 ms
+    And the UI double throws on <call> for both registration-failure notice attempts
+    When the receiver runs for 60000 ms
+    Then registration-failure notice attempts were made only at 0 ms and 5000 ms
+    And no registration-failure notice window exists at any time
+    And no logging-failure notice was shown at any time
+
+    Examples:
+      | call   |
+      | create |
+      | add    |
+
+  @offline @failure @AIR-019 @AT-19 @OD-100 @OD-107 @OD-111
+  Scenario: Broadcasts after a registration with no sticky state do not move the notice's retry
+    Given the parking check is on, on a supported build
+    And ACC registration returns no sticky state at 0 ms
+    And the UI double throws on add for the first registration-failure notice attempt
+    When ACC status changes to 0 at 1000 ms
+    And ACC status changes to 6 at 3000 ms
+    And the receiver runs for 12000 ms
+    Then registration-failure notice attempts were made only at 0 ms and 5000 ms
+    And that window was removed by one removal call at exactly 10000 ms
+
+  @offline @failure @AIR-019 @AT-19 @OD-107 @OD-111
+  Scenario Outline: Exit drops the registration-failure notice's pending retry
+    Given the parking check is on, on a supported build
+    And ACC registration throws an exception at 0 ms
+    And the UI double throws on add for the first registration-failure notice attempt
+    When the receiver starts exit at <exit> ms
+    Then no registration-failure notice attempt was made after 0 ms
+    And exit completes without waiting for the retry
+    And no registration-failure notice window exists after exit
+
+    Examples:
+      | exit |
+      | 3000 |
+      | 5000 |
+
+  @offline @failure @AIR-019 @AT-19 @OD-107 @OD-111
+  Scenario: After exit dropped a retry, the next failing start makes its own first attempt
+    Given the parking check is on, on a supported build
+    And during the previous app start the first registration-failure notice attempt failed and exit came at 3000 ms
+    When the receiver starts again and ACC registration throws an exception at 400 ms
+    And the receiver runs for 12000 ms
+    Then the first registration-failure notice attempt since the restart was made at 400 ms
+    And no removal call was made for any window of the previous app start
+
+  @offline @failure @AIR-019 @AIR-040 @AT-19 @AT-40 @OD-116
+  Scenario: Exit removes a registration-failure notice that is on screen
+    Given the parking check is on, on a supported build
+    And ACC registration throws an exception at 0 ms
+    When the receiver starts exit at 2000 ms
+    Then exactly one removal call for the registration-failure window was made, at 2000 ms
+    And no removal call was made at 5000 ms
+    And exit completes
 
   @offline @boundary @AIR-018 @AT-18 @OD-46 @OD-61
   Scenario Outline: Leaving Park removes the image within 250 ms of the poll that sees it

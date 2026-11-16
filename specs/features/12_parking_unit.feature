@@ -2,11 +2,14 @@
 Feature: The parking gate on the owner's head unit
   These scenarios need the receiver installed on the owner's unit (260206 CA). They never run from
   the PC suite: their evidence is the receiver's logs and the owner's observations, saved to the
-  stick. Offline results never stand in for them (AT-16 to AT-27, AT-35 to AT-40).
+  stick. Offline results never stand in for them (AT-16 to AT-27, AT-35 to AT-41).
 
   A scenario whose Given the unit never reached is reported as unexercised, not as passed. The
-  registration-failure and logging-failure notices are as defined in 09_parking_gate.feature;
-  their wording, timing and duration are not asserted (AMB-73).
+  registration-failure and logging-failure notices, and their exact texts, are as defined in
+  09_parking_gate.feature. On the unit their text, form and display time of about 5 s are observed
+  by hand or from a screen recording, not measured to the millisecond. "Covered" is as defined in
+  11_parking_logs.feature. Stick evidence follows specs/README.md: no raw runs are committed and
+  no phone content is recorded.
 
   @normal @AIR-016 @AT-16
   Scenario: An unmodified package starts with the parking check on
@@ -63,6 +66,8 @@ Feature: The parking gate on the owner's head unit
     And for every start whose registration failed, an observation independent of the receiver's log shows whether a registration-failure notice appeared
     And that observation shows no registration-failure notice in any start with the check off
     And a registration that threw or returned no sticky state is listed as unexercised, for each check state, if no start reached it
+    And a registration-failure notice that failed to show, and so its retry, is listed as unexercised if no start reached it
+    And a notice window that could not be removed is listed as unexercised if no start reached it
     And the long-off sequence (ACC status 6, 7, 255, shutdown and process start) is listed as unexercised if the unit did not reach it
 
   @normal @AIR-020 @AT-20 @OD-51
@@ -196,3 +201,82 @@ Feature: The parking gate on the owner's head unit
     When logging fails, more than once, in that app start
     Then the owner saw exactly one logging-failure notice and no registration-failure notice in that app start
     And the evidence, kept outside the failed log, shows the parking check off and the gate never blocking video
+
+  @failure @AIR-019 @AIR-041 @AT-19 @OD-106 @OD-107 @OD-115 @OD-116
+  Scenario: On the unit, the registration-failure notice is observed as a toast with its exact text
+    Given an app start on the owner's unit, with the parking check on, in which ACC registration failed
+    When the registration-failure notice appears
+    Then an observation independent of the receiver's log records a toast-looking window with the text "Mirroring is off: the car's power state couldn't be read. Restart the receiver from NEMESIS Manager."
+    And it records roughly how long the notice stayed on screen, expected about 5 seconds
+    And it records whether the notice went away by itself
+    And it records whether a retry appeared about 5 seconds after a notice that failed to show
+    And it records whether the notice was ever seen over the reversing camera or another stock window
+
+  @failure @AIR-040 @AT-40 @OD-112 @OD-115 @OD-116 @OD-118
+  Scenario: On the unit, the logging-failure notice is observed as a toast with its exact text
+    Given an app start on the owner's unit in which logging failed
+    When the logging-failure notice appears
+    Then an observation independent of the receiver's log records a toast-looking window with the text "Receiver logging stopped working. Mirroring is unaffected."
+    And it records the time on screen, timed by hand or from a recording with no phone content, expected about 5 seconds
+    And it records whether the notice went away by itself
+    And where both notices were on screen together, it records whether both were readable with the logging-failure notice just above
+    And it records whether a retry appeared about 5 seconds after a notice that failed to show
+    And the evidence is kept outside the failed receiver log
+
+  @normal @AIR-040 @AT-40 @OD-116
+  Scenario: On the unit, the installed receiver holds no permission to draw over other apps
+    Given the receiver package is installed on the owner's unit
+    When the installed package's permissions are listed
+    Then the stick evidence records that SYSTEM_ALERT_WINDOW is not held
+
+  @failure @AIR-040 @AT-40 @OD-107 @OD-118 @OD-119
+  Scenario: On the unit, notice cases the unit never gave are listed as unexercised
+    Given the unit tests of the on-screen notices are finished
+    Then a notice that failed to show is listed as unexercised if the unit gave none
+    And two notices on screen together are listed as unexercised if the unit gave none
+    And a notice window that could not be removed is listed as unexercised if the unit gave none
+
+  @normal @AIR-041 @AT-41 @OD-117 @OD-127
+  Scenario: The receiver is not released publicly until the reversing-camera run passes
+    Given the reversing-camera scenario below has not passed on the owner's unit
+    Then no public release of the receiver is made
+    And staging the receiver on the owner's stick is still allowed
+    And an offline pass of the covering scenarios does not count as that run
+
+  @normal @AIR-041 @AT-41 @OD-117 @OD-120 @OD-124 @OD-128 @OD-130
+  Scenario: Shifting into reverse removes a notice before the camera image appears, and it comes back covered=no
+    Given the receiver is mirroring on the owner's unit, with a notice on screen
+    When the owner shifts from Park to Reverse and back to Park within 5 seconds of the notice appearing
+    Then the stick evidence and an independent observation show the notice gone no later than the camera image
+    And the notice was never seen over the camera image
+    And the receiver's records hold "reverse_on received" and a "notice cover" record with "covered=yes" and "cause=reverse"
+    And those records are timed at or after the PgsService REVERSE_ON log line and before AvmCamera takes focus
+    And the receiver's records hold a "notice cover" record with "covered=no" after the AvmMode REVERSE_OFF log line, when focus returns
+
+  @failure @AIR-041 @AT-41 @OD-124 @OD-130
+  Scenario: A reversing run with no "reverse_on received" record fails
+    Given the owner shifted from Park to Reverse and back with the receiver running
+    When the stick evidence holds no "reverse_on received" record for that shift
+    Then the reversing-camera scenario is reported as failed, not unexercised
+
+  @normal @AIR-041 @AT-41 @OD-117 @OD-120 @OD-122
+  Scenario: A notice waits while the launcher or settings has focus and appears when the receiver is back on top
+    Given a notice is due on the owner's unit
+    When the owner opens the launcher or the settings app before it appears, and then returns to the receiver
+    Then the independent observation shows no notice while the launcher or settings had focus
+    And it shows the held notice appearing when the receiver was back on top
+
+  @failure @AIR-041 @AT-41 @OD-126 @OD-129
+  Scenario: Covering cases the unit never gave are listed as unexercised
+    Given the unit tests of covering are finished
+    Then SVM, DRVM, Heads Up and SS_OSD_Window covering are listed as unexercised
+    And a window that could not be removed while covered is listed as unexercised if the unit gave none
+    And a failed REVERSE_ON registration is listed as unexercised if the unit gave none
+    And a REVERSE_ON with no focus change is listed as unexercised if the unit gave none
+    And any other covering case the unit did not reach is listed as unexercised
+
+  @normal @AIR-041 @AT-41 @OD-127
+  Scenario: Covering evidence is kept on the stick without raw runs or phone content
+    Given the reversing-camera run has been recorded
+    Then its evidence is kept on the stick and not committed as raw runs
+    And it contains no phone content
