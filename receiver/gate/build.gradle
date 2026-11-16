@@ -34,7 +34,7 @@ def featuresDir = rootProject.file('specs/features')
 test {
     useJUnitPlatform()
     // Only S2's synthetic scenarios run here; @unit evidence checks come last (OD-135).
-    systemProperty 'cucumber.features', featuresDir.absolutePath
+    systemProperty 'cucumber.features', System.getProperty('cucumber.features', featuresDir.absolutePath)
     systemProperty 'cucumber.glue', 'parkcast.gate.steps'
     systemProperty 'cucumber.filter.tags', System.getProperty('cucumber.filter.tags', '@S2 and @offline')
     systemProperty 'cucumber.plugin', 'summary'
