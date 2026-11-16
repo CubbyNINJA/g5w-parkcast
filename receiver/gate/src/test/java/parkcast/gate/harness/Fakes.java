@@ -344,6 +344,8 @@ public final class Fakes {
         public final String text, kind;
         public final int start;
         public final long at;
+        /** A platform toast made for the registration text to read placement from; never shown. */
+        public boolean toast;
 
         View(String text, String kind, int start, long at) {
             this.text = text;
@@ -402,14 +404,33 @@ public final class Fakes {
 
     public static final class Notices implements NoticeWindows {
         private final VirtualScheduler s;
-        /** "start|kind|attempt|op" keys whose call throws. */
+        /** "start|kind|attempt|op" keys whose call throws; op is create, toast, placement, measure or add. */
         public final Set<String> throwKeys = new HashSet<>();
+        /** "start|kind|attempt" keys whose measurement returns height 0. */
+        public final Set<String> zeroMeasure = new HashSet<>();
         /** Per start: how many removal calls of its first registration-failure window throw. */
         public final Map<Integer, Integer> regRemoveThrows = new HashMap<>();
+        /** "start|kind": how many removal calls of the first window of that kind in that start throw. */
+        public final Map<String, Integer> removeThrows = new HashMap<>();
+        /** "start|kind|t" keys (kind may be *): a removal call at that time on such a window throws. */
+        public final Set<String> removeThrowAt = new HashSet<>();
+        /** What the platform toast made for the registration text supplies. */
+        public int placeGravity = 0x51, placeX = 0, placeY = 96;
+        /** The one measured view height H, the same for every view. */
+        public int measuredH = 64;
+        /** The port has no updateViewLayout, so this stays 0; kept so steps can say so. */
+        public int updateViewLayoutCalls;
         public final List<Op> ops = new ArrayList<>();
         public final List<View> views = new ArrayList<>();
         public final List<Window> windows = new ArrayList<>();
         private final Map<String, Integer> attempts = new HashMap<>();
+        private final Set<String> firstSeen = new HashSet<>();
+
+        /** The attempt in progress: started by a create, ended by an add, a throw, or a height of 0 or less. */
+        private String curKind;
+        private int curAttempt, curStart = -1;
+        private long curAt = -1;
+        private boolean curToast;
 
         public Notices(VirtualScheduler s) {
             this.s = s;
@@ -424,16 +445,46 @@ public final class Fakes {
             return a == null ? 0 : a;
         }
 
+        private boolean inProgress() {
+            return curKind != null && curStart == s.startIndex && curAt == s.now();
+        }
+
+        private void end() {
+            curKind = null;
+        }
+
         private void check(String kind, int attempt, String op) {
-            if (throwKeys.contains(s.startIndex + "|" + kind + "|" + attempt + "|" + op))
+            if (throwKeys.contains(s.startIndex + "|" + kind + "|" + attempt + "|" + op)) {
+                end();
                 throw new RuntimeException("synthetic UI failure on " + op);
+            }
+        }
+
+        /** The notice kind a call on {@code v} belongs to: the attempt in progress, else the view's own kind. */
+        private String kindFor(NoticeView v) {
+            if (inProgress()) return curKind;
+            return v instanceof View ? ((View) v).kind : REG;
         }
 
         @Override
         public NoticeView create(String text) {
             String kind = kindOf(text);
+            if (REG.equals(kind) && inProgress() && !curToast) {
+                curToast = true;
+                ops.add(new Op(s.startIndex, s.now(), "toast", curKind, curAttempt, null, null, text));
+                check(curKind, curAttempt, "toast");
+                View v = new View(text, curKind, s.startIndex, s.now());
+                v.toast = true;
+                views.add(v);
+                return v;
+            }
             int a = attempt(kind) + 1;
             attempts.put(s.startIndex + "|" + kind, a);
+            curKind = kind;
+            curAttempt = a;
+            curStart = s.startIndex;
+            curAt = s.now();
+            curToast = false;
             ops.add(new Op(s.startIndex, s.now(), "create", kind, a, null, null, text));
             check(kind, a, "create");
             View v = new View(text, kind, s.startIndex, s.now());
@@ -443,30 +494,43 @@ public final class Fakes {
 
         @Override
         public int measure(NoticeView v, int displayWidth) {
-            String kind = v instanceof View ? ((View) v).kind : REG;
-            int a = attempt(kind);
+            String kind = kindFor(v);
+            int a = inProgress() ? curAttempt : attempt(kind);
             ops.add(new Op(s.startIndex, s.now(), "measure", kind, a, v instanceof View ? (View) v : null, null, null));
             check(kind, a, "measure");
-            return 64;
+            if (zeroMeasure.contains(s.startIndex + "|" + kind + "|" + a)) {
+                end();
+                return 0;
+            }
+            return measuredH;
         }
 
         @Override
         public Placement placementFrom(NoticeView regFailToast) {
-            ops.add(new Op(s.startIndex, s.now(), "placement", REG, attempt(REG), null, null, null));
-            return new Placement(0x51, 0, 96);
+            String kind = kindFor(regFailToast);
+            int a = inProgress() ? curAttempt : attempt(kind);
+            ops.add(new Op(s.startIndex, s.now(), "placement", kind, a, regFailToast instanceof View ? (View) regFailToast : null,
+                    null, null));
+            check(kind, a, "placement");
+            return new Placement(placeGravity, placeX, placeY);
         }
 
         @Override
         public Win add(NoticeView v, WindowSpec spec) {
             View view = v instanceof View ? (View) v : null;
             String kind = view != null ? view.kind : REG;
-            int a = attempt(kind);
+            int a = inProgress() && curKind.equals(kind) ? curAttempt : attempt(kind);
             ops.add(new Op(s.startIndex, s.now(), "add", kind, a, view, spec, view != null ? view.text : null));
             check(kind, a, "add");
+            end();
             Window w = new Window(view, spec, s.now(), s.startIndex, a);
-            if (REG.equals(kind)) {
-                Integer n = regRemoveThrows.remove(s.startIndex);
-                if (n != null) w.throwsLeft = n;
+            if (firstSeen.add(s.startIndex + "|" + kind)) {
+                if (REG.equals(kind)) {
+                    Integer n = regRemoveThrows.remove(s.startIndex);
+                    if (n != null) w.throwsLeft = n;
+                }
+                Integer n = removeThrows.remove(s.startIndex + "|" + kind);
+                if (n != null) w.throwsLeft += n;
             }
             windows.add(w);
             return w;
@@ -474,10 +538,15 @@ public final class Fakes {
 
         @Override
         public void remove(Win w) {
-            ops.add(new Op(s.startIndex, s.now(), "remove", w instanceof Window ? ((Window) w).kind() : REG, 0, null, null, null));
+            String kind = w instanceof Window ? ((Window) w).kind() : REG;
+            int a = w instanceof Window ? ((Window) w).attempt : 0;
+            ops.add(new Op(s.startIndex, s.now(), "remove", kind, a, w instanceof Window ? ((Window) w).view : null, null, null));
             if (!(w instanceof Window)) throw new IllegalArgumentException("not a window this double added: " + w);
             Window x = (Window) w;
             x.removeCalls.add(s.now());
+            boolean timed = removeThrowAt.remove(s.startIndex + "|" + kind + "|" + s.now())
+                    | removeThrowAt.remove(s.startIndex + "|*|" + s.now());
+            if (timed) throw new RuntimeException("synthetic UI failure on remove at " + s.now());
             if (x.throwsLeft > 0) {
                 x.throwsLeft--;
                 throw new RuntimeException("synthetic UI failure on remove");
@@ -520,7 +589,68 @@ public final class Fakes {
         }
     }
 
+    /** One log file: its bytes as appended pieces, and when it was rotated and deleted. */
+    public static final class LogFile {
+        public final int serial;
+        public final String origin;
+        public long size, maxSize;
+        /** Appended pieces in order: {append id, length}; id -1 is seeded or padding content. */
+        public final List<long[]> pieces = new ArrayList<>();
+        public long rotatedAt = -1, deletedAt = -1;
+        public int rotatedSeq = -1, deletedSeq = -1;
+        /** Deleted by deleteOlder() as a whole file, not replaced by a rotation. */
+        public boolean deletedWhole;
+
+        LogFile(int serial, String origin) {
+            this.serial = serial;
+            this.origin = origin;
+        }
+
+        public boolean rotated() {
+            return rotatedSeq >= 0;
+        }
+
+        public boolean deleted() {
+            return deletedSeq >= 0;
+        }
+
+        /** Bytes of append {@code id} in this file. */
+        public long bytesOf(long id) {
+            long n = 0;
+            for (long[] p : pieces) if (p[0] == id) n += p[1];
+            return n;
+        }
+
+        @Override
+        public String toString() {
+            return "file#" + serial + "(" + origin + ", " + size + " bytes" + (rotated() ? ", rotated at " + rotatedAt : "")
+                    + (deleted() ? ", deleted" + (deletedWhole ? " whole" : " by replacement") + " at " + deletedAt : "") + ")";
+        }
+    }
+
+    /** One append call that returned normally. */
+    public static final class Append {
+        public final long id, len, t;
+        public final int start;
+        public final LogFile file;
+
+        Append(long id, long len, long t, int start, LogFile file) {
+            this.id = id;
+            this.len = len;
+            this.t = t;
+            this.start = start;
+            this.file = file;
+        }
+    }
+
+    /**
+     * The receiver's log folder: a current file and an older file, each with a size. Faults are armed per app
+     * start and clock time; the files survive a restart.
+     */
     public static final class Logs implements LogFiles {
+        /** Text of a record longer than this is not kept in {@link #lines}, only its size. */
+        private static final int KEEP_TEXT = 65536;
+
         private final VirtualScheduler s;
         public final List<Line> lines = new ArrayList<>();
         public final Map<String, Long> sizes = new LinkedHashMap<>();
@@ -530,29 +660,133 @@ public final class Fakes {
         public String failOnceOn;
         public int rotations, deletions, failures;
 
+        public LogFile cur, old;
+        public final List<LogFile> files = new ArrayList<>();
+        public final List<Append> appends = new ArrayList<>();
+        /** Failed operations, as "start|t|op". */
+        public final List<String> failed = new ArrayList<>();
+        public long maxTotal, maxSingle;
+        private long nextAppendId = 1;
+        private int seq;
+
+        /** "start|t" keys: the first append at that time fails. */
+        public final Set<String> failAppendAt = new HashSet<>();
+        /** "start|t" keys: the first append after that time fails. */
+        public final Set<String> failFirstAfter = new HashSet<>();
+        /** "start|t" keys: deleteOlder() at that time fails. */
+        public final Set<String> failDeleteAt = new HashSet<>();
+        /** {start, from, until}: the current file can't be created, so appends fail (until -1 = for good). */
+        public final List<long[]> down = new ArrayList<>();
+
         public Logs(VirtualScheduler s) {
             this.s = s;
         }
 
+        private LogFile newFile(String origin) {
+            LogFile f = new LogFile(files.size() + 1, origin);
+            files.add(f);
+            return f;
+        }
+
+        /** Seeds the folder: a current file of {@code current} bytes and, if {@code older >= 0}, an older one. */
+        public void seed(long current, long older) {
+            clear();
+            if (older >= 0) {
+                old = newFile("seeded older");
+                old.size = older;
+                if (older > 0) old.pieces.add(new long[] {-1, older});
+            }
+            cur = newFile("seeded current");
+            cur.size = current;
+            if (current > 0) cur.pieces.add(new long[] {-1, current});
+            track();
+        }
+
+        /** Pads the current file with unattributed bytes up to {@code size}. */
+        public void padTo(long size) {
+            if (cur == null) cur = newFile("current");
+            if (size > cur.size) {
+                cur.pieces.add(new long[] {-1, size - cur.size});
+                cur.size = size;
+            }
+            track();
+        }
+
+        /** An empty folder and no records; armed faults stay armed. */
+        public void clear() {
+            lines.clear();
+            sizes.clear();
+            files.clear();
+            appends.clear();
+            cur = null;
+            old = null;
+            maxTotal = 0;
+            maxSingle = 0;
+        }
+
+        private String key(long t) {
+            return s.startIndex + "|" + t;
+        }
+
+        private boolean isDown() {
+            for (long[] d : down)
+                if (d[0] == s.startIndex && s.now() >= d[1] && (d[2] < 0 || s.now() < d[2])) return true;
+            return false;
+        }
+
+        private IOException fail(String op) {
+            failures++;
+            failed.add(s.startIndex + "|" + s.now() + "|" + op);
+            return new IOException("synthetic " + op + " failure");
+        }
+
+        private void track() {
+            sizes.clear();
+            if (cur != null) sizes.put("receiver.log", cur.size);
+            if (old != null && !old.deleted()) sizes.put(older("receiver.log"), old.size);
+            long total = 0;
+            for (LogFile f : new LogFile[] {cur, old})
+                if (f != null && !f.deleted()) {
+                    total += f.size;
+                    f.maxSize = Math.max(f.maxSize, f.size);
+                    maxSingle = Math.max(maxSingle, f.size);
+                }
+            maxTotal = Math.max(maxTotal, total);
+        }
+
         @Override
         public long size(String name) {
-            Long n = sizes.get(name);
-            return n == null ? 0 : n;
+            if (name.endsWith(".1")) return old == null || old.deleted() ? 0 : old.size;
+            return cur == null ? 0 : cur.size;
         }
 
         @Override
         public void append(String name, byte[] b) throws IOException {
             String text = new String(b, StandardCharsets.UTF_8);
-            if (failOn != null && text.contains(failOn)) {
-                failures++;
-                throw new IOException("synthetic write failure");
-            }
+            if (failOn != null && text.contains(failOn)) throw fail("append");
             if (failOnceOn != null && text.contains(failOnceOn)) {
                 failOnceOn = null;
-                failures++;
-                throw new IOException("synthetic write failure");
+                throw fail("append");
             }
-            sizes.put(name, size(name) + b.length);
+            if (failAppendAt.remove(key(s.now()))) throw fail("append");
+            for (String k : new ArrayList<>(failFirstAfter)) {
+                int bar = k.indexOf('|');
+                if (Integer.parseInt(k.substring(0, bar)) == s.startIndex && s.now() > Long.parseLong(k.substring(bar + 1))) {
+                    failFirstAfter.remove(k);
+                    throw fail("append");
+                }
+            }
+            if (isDown()) throw fail("create");
+            if (cur == null) cur = newFile("current");
+            long id = nextAppendId++;
+            cur.pieces.add(new long[] {id, b.length});
+            cur.size += b.length;
+            appends.add(new Append(id, b.length, s.now(), s.startIndex, cur));
+            track();
+            if (b.length > KEEP_TEXT) {
+                lines.add(new Line(s.startIndex, s.now(), name, "<" + b.length + " bytes>"));
+                return;
+            }
             for (String l : text.split("\r?\n")) if (!l.isEmpty()) lines.add(new Line(s.startIndex, s.now(), name, l));
         }
 
@@ -561,20 +795,65 @@ public final class Fakes {
             return current + ".1";
         }
 
-        private String current = "receiver.log";
-
         @Override
-        public void rotate() {
+        public void rotate() throws IOException {
+            if (isDown()) throw fail("rotate");
             rotations++;
-            for (String name : new ArrayList<>(sizes.keySet())) if (!name.endsWith(".1")) current = name;
-            sizes.put(older(current), size(current));
-            sizes.put(current, 0L);
+            seq++;
+            if (old != null && !old.deleted()) {
+                old.deletedSeq = seq;
+                old.deletedAt = s.now();
+            }
+            if (cur == null) cur = newFile("current");
+            cur.rotatedSeq = seq;
+            cur.rotatedAt = s.now();
+            old = cur;
+            cur = newFile("current");
+            track();
         }
 
         @Override
-        public void deleteOlder() {
+        public void deleteOlder() throws IOException {
+            if (failDeleteAt.remove(key(s.now()))) throw fail("delete");
             deletions++;
-            sizes.remove(older(current));
+            seq++;
+            if (old != null && !old.deleted()) {
+                old.deletedSeq = seq;
+                old.deletedAt = s.now();
+                old.deletedWhole = true;
+            }
+            track();
+        }
+
+        /** The append with this id, or null. */
+        public Append append(long id) {
+            for (Append a : appends) if (a.id == id) return a;
+            return null;
+        }
+
+        /** The appends made after the one with id {@code after}. */
+        public List<Append> appendsAfter(long after) {
+            List<Append> out = new ArrayList<>();
+            for (Append a : appends) if (a.id > after) out.add(a);
+            return out;
+        }
+
+        public long lastAppendId() {
+            return nextAppendId - 1;
+        }
+
+        /** Files still present (not deleted) holding at least one byte of append {@code id}. */
+        public List<LogFile> holding(long id) {
+            List<LogFile> out = new ArrayList<>();
+            for (LogFile f : files) if (!f.deleted() && f.bytesOf(id) > 0) out.add(f);
+            return out;
+        }
+
+        /** Every file, present or deleted, holding at least one byte of append {@code id}. */
+        public List<LogFile> everHolding(long id) {
+            List<LogFile> out = new ArrayList<>();
+            for (LogFile f : files) if (f.bytesOf(id) > 0) out.add(f);
+            return out;
         }
 
         public List<Line> containing(String x) {
@@ -757,11 +1036,26 @@ public final class Fakes {
     public static final class Regulation implements RegulationSource {
         public RegulationListener listener;
         public int registers, unregisters;
+        /** The state the source reports at registration (null: none reported). */
+        public String initial;
 
         @Override
         public void register(RegulationListener l) {
             listener = l;
             registers++;
+            if (initial != null) l.state(initial);
+        }
+
+        /** Scripts a state change (or, for "unavailable", a loss with {@code reason}) at {@code t}. */
+        public void changeAt(VirtualScheduler s, long t, final String state, final String reason) {
+            s.script(t, VirtualScheduler.BEFORE, new Runnable() {
+                @Override
+                public void run() {
+                    if (listener == null) return;
+                    if ("unavailable".equals(state)) listener.unavailable(reason);
+                    else listener.state(state);
+                }
+            });
         }
 
         @Override

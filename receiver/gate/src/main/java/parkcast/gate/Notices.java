@@ -104,7 +104,7 @@ public final class Notices {
         private static final int UNCOVER_REMOVAL = 4;
 
         private final String text;
-        /** The logging-failure notice sits one toast height above the registration-failure notice. */
+        /** The logging-failure notice sits one registration-failure toast height above the registration-failure slot. */
         private final boolean raised;
 
         /** The allowance is used: further failures of this kind make no attempt. */
@@ -148,12 +148,19 @@ public final class Notices {
             attempt(n);
         }
 
-        /** Creates, places and adds this notice's window; a throw or a bad measurement fails the attempt. */
+        /**
+         * Creates this notice's view, places it from a registration-failure toast that is never shown, and adds
+         * its window (AIR-040(g), OD-121). Both notices take gravity and x from that toast, falling back to the
+         * bottom centre; the registration-failure window takes its y, and the logging-failure window that y plus
+         * the toast view's height, measured just before the add. Any throw, or a height of 0 or less, fails the
+         * attempt of this notice.
+         */
         private void attempt(int n) {
             Win added;
             try {
                 NoticeView view = windows.create(text);
-                Placement p = windows.placementFrom(view);
+                NoticeView toast = windows.create(REGISTRATION_TEXT);
+                Placement p = windows.placementFrom(toast);
                 if (p == null) {
                     failed(n);
                     return;
@@ -166,7 +173,7 @@ public final class Notices {
                 }
                 int y = p.y;
                 if (raised) {
-                    int h = windows.measure(view, displayWidth);
+                    int h = windows.measure(toast, displayWidth);
                     if (h <= 0) {
                         failed(n);
                         return;

@@ -31,6 +31,13 @@ public final class World {
     public int displayWidth = 1280;
     /** When the activity window first gains focus; 0 = inside the start, -1 = no activity window. */
     public long focusAt = 0;
+    /**
+     * The scheduler rank of the first focus gain. FIRST puts a focus at 0 ms inside the lifecycle; a later rank
+     * delivers it after the scripted events of that same millisecond (the activity is still covered then).
+     */
+    public int focusRank = VirtualScheduler.FIRST;
+    /** What "the parking check is X and mirrored video is Y" set up ("on"/"off", "permitted"/"blocked"), or null. */
+    public String gateCheck, gateVideo;
     /** How long a Then step runs a receiver that was started but never run. */
     public long settleMs = 1000;
 
@@ -53,13 +60,14 @@ public final class World {
                 screen, session, vehicle, displayWidth);
         receiver = r;
         final long focus = focusAt;
+        final boolean inLifecycle = focus == 0 && focusRank == VirtualScheduler.FIRST;
         scheduler.script(0, VirtualScheduler.FIRST, () -> {
             r.onCreate();
             r.onStart();
             r.onResume();
-            if (focus == 0) r.onWindowFocusChanged(true);
+            if (inLifecycle) r.onWindowFocusChanged(true);
         });
-        if (focus > 0) scheduler.script(focus, VirtualScheduler.FIRST, () -> r.onWindowFocusChanged(true));
+        if (focus >= 0 && !inLifecycle) scheduler.script(focus, focusRank, () -> r.onWindowFocusChanged(true));
         frames.startFor(r);
         scheduler.runUntil(0);
         ranUntil = 0;
@@ -187,5 +195,33 @@ public final class World {
         List<Long> shownAt = new ArrayList<>();
         for (Fakes.Shown s : shows()) shownAt.add(s.t);
         return "shown at " + shownAt + ", cleared at " + clears() + ", calls " + calls();
+    }
+
+    // ------------------------------------------------------------ the log writer on its own (11, AT-39)
+
+    private GateLog sizeLog;
+
+    /** The folder the LogFiles port maps the receiver's log files to on the unit. */
+    public static String logFolder() {
+        return GateLog.FOLDER;
+    }
+
+    /** The most bytes one log file may hold (AIR-039). */
+    public static long logFileCap() {
+        return GateLog.FILE_CAP;
+    }
+
+    /**
+     * Logs one record of exactly {@code n} bytes, its newline terminator included, through a log writer on
+     * this scenario's log files and clock. The writer's time prefix would make records under a few bytes
+     * impossible, so the size scenarios use this seam instead of a receiver.
+     */
+    public void logRecordOfSize(long n) {
+        if (n < 1 || n > Integer.MAX_VALUE) throw new IllegalArgumentException("record size " + n);
+        byte[] b = new byte[(int) n];
+        java.util.Arrays.fill(b, (byte) 'x');
+        b[b.length - 1] = (byte) '\n';
+        if (sizeLog == null) sizeLog = new GateLog(logs, scheduler);
+        sizeLog.put(b);
     }
 }

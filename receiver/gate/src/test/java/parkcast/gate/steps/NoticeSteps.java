@@ -8,6 +8,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import parkcast.gate.World;
 import parkcast.gate.harness.Fakes;
+import parkcast.gate.harness.VirtualScheduler;
 import parkcast.gate.port.WindowSpec;
 
 /**
@@ -19,6 +20,8 @@ import parkcast.gate.port.WindowSpec;
 public class NoticeSteps {
     /** The y the notice double's placementFrom hands out, and the height its measure returns. */
     private static final int PLACEMENT_Y = 96, MEASURED_H = 64;
+    /** Gravity.TOP, and Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL. */
+    private static final int GRAVITY_TOP = 0x30, GRAVITY_BOTTOM_CENTRE = 0x51;
     private static final Pattern QUOTED = Pattern.compile("\"([^\"]*)\"");
 
     private final World w;
@@ -140,8 +143,8 @@ public class NoticeSteps {
     @Given("^the registration-failure notice (is shown|fails to show|fails to show and its retry is shown|fails to show and its retry fails to show|is shown and its removal call throws|is shown and both its removal calls throw)$")
     public void regNoticeOutcome(String outcome) {
         int start = w.scheduler.startIndex;
-        if (outcome.startsWith("fails to show")) throwOn(start, 1, "add");
-        if (outcome.endsWith("its retry fails to show")) throwOn(start, 2, "add");
+        if (outcome.startsWith("fails to show")) throwOn(start, Fakes.REG, 1, "add");
+        if (outcome.endsWith("its retry fails to show")) throwOn(start, Fakes.REG, 2, "add");
         if (outcome.endsWith("its removal call throws")) w.notices.regRemoveThrows.put(start, 1);
         if (outcome.endsWith("both its removal calls throw")) w.notices.regRemoveThrows.put(start, 2);
     }
@@ -184,18 +187,21 @@ public class NoticeSteps {
 
     // ------------------------------------------------------------ the notice's window
 
-    /** The registration-failure add call and window a step named, for "that add call", "its", "that window". */
+    /** The notice add call, window and kind a step named, for "that add call", "its", "that window", "one more". */
     private Fakes.Op thatAdd;
     private Fakes.Window thatWindow;
+    private String thatKind = Fakes.REG;
 
-    @Then("^exactly one registration-failure notice add call was made, at (?:exactly )?(\\d+) ms$")
-    public void oneRegAddAt(long t) {
+    @Then("^exactly one (registration|logging)-failure notice add call was made, at (?:exactly )?(\\d+) ms$")
+    public void oneAddAt(String which, long t) {
         w.settle();
-        List<Fakes.Op> adds = w.notices.ops("add", Fakes.REG, w.scheduler.startIndex);
-        if (adds.size() != 1) throw new AssertionError(adds.size() + " registration-failure add calls, at " + times(adds));
-        if (adds.get(0).t != t) throw new AssertionError("the registration-failure add call was made at " + adds.get(0).t + " ms");
+        String kind = kindOf(which);
+        List<Fakes.Op> adds = w.notices.ops("add", kind, w.scheduler.startIndex);
+        if (adds.size() != 1) throw new AssertionError(adds.size() + " " + which + "-failure add calls, at " + times(adds));
+        if (adds.get(0).t != t) throw new AssertionError("the " + which + "-failure add call was made at " + adds.get(0).t + " ms");
+        thatKind = kind;
         thatAdd = adds.get(0);
-        thatWindow = windowAddedAt(t);
+        thatWindow = windowAddedAt(kind, t);
     }
 
     @Then("that add call has window type TYPE_TOAST and a view from the toast-view factory")
@@ -232,13 +238,15 @@ public class NoticeSteps {
                         + o.t + " ms");
     }
 
-    @Then("the registration-failure notice was shown at {int} ms")
-    public void regNoticeShownAt(int t) {
+    @Then("^the (registration|logging)-failure notice was shown at (\\d+) ms$")
+    public void noticeShownAt(String which, long t) {
         w.settle();
-        thatWindow = windowAddedAt(t);
+        String kind = kindOf(which);
+        thatKind = kind;
+        thatWindow = windowAddedAt(kind, t);
         if (thatWindow == null)
-            throw new AssertionError("no registration-failure notice was shown at " + t + " ms; added at "
-                    + addedTimes(w.notices.windows(Fakes.REG, w.scheduler.startIndex)));
+            throw new AssertionError("no " + which + "-failure notice was shown at " + t + " ms; added at "
+                    + addedTimes(w.notices.windows(kind, w.scheduler.startIndex)));
     }
 
     @Then("its window is on screen at {int} ms")
@@ -249,20 +257,38 @@ public class NoticeSteps {
                     + win.removedAt + " ms)");
     }
 
-    @Then("^exactly one removal call for (?:it|the registration-failure window) was made, at (?:exactly )?(\\d+) ms$")
-    public void oneRemovalAt(long t) {
+    @Then("^exactly one removal call for (?:it|the (registration|logging)-failure window) was made, at (?:exactly )?(\\d+) ms$")
+    public void oneRemovalAt(String which, long t) {
         w.settle();
-        Fakes.Window win = thatWindow != null ? thatWindow : only(Fakes.REG);
+        Fakes.Window win;
+        if (which == null) {
+            win = thatWindow != null ? thatWindow : only(thatKind);
+        } else {
+            String kind = kindOf(which);
+            win = thatWindow != null && thatWindow.kind().equals(kind) ? thatWindow : only(kind);
+        }
         if (win.removeCalls.size() != 1 || win.removeCalls.get(0) != t)
-            throw new AssertionError("the registration-failure window added at " + win.addedAt + " ms had removal calls at "
+            throw new AssertionError("the " + nameOf(win.kind()) + " window added at " + win.addedAt + " ms had removal calls at "
                     + win.removeCalls + " ms");
     }
 
-    @Then("no other registration-failure notice add call was made")
-    public void noOtherRegAdd() {
+    /** The exit wording (l.461 of 11): no comma, and it counts removal calls, not windows. */
+    @Then("^exactly one removal call for the (registration|logging)-failure window was made at (\\d+) ms$")
+    public void oneRemovalCallAt(String which, long t) {
         w.settle();
-        List<Fakes.Op> adds = w.notices.ops("add", Fakes.REG, w.scheduler.startIndex);
-        if (adds.size() != 1) throw new AssertionError(adds.size() + " registration-failure add calls, at " + times(adds));
+        String kind = kindOf(which);
+        int n = 0;
+        for (Fakes.Op o : w.notices.ops("remove", kind, w.scheduler.startIndex)) if (o.t == t) n++;
+        if (n != 1)
+            throw new AssertionError(n + " removal calls for the " + which + "-failure window at " + t + " ms; all at "
+                    + times(w.notices.ops("remove", kind, w.scheduler.startIndex)));
+    }
+
+    @Then("^no other (registration|logging)-failure notice add call was made$")
+    public void noOtherAdd(String which) {
+        w.settle();
+        List<Fakes.Op> adds = w.notices.ops("add", kindOf(which), w.scheduler.startIndex);
+        if (adds.size() != 1) throw new AssertionError(adds.size() + " " + which + "-failure add calls, at " + times(adds));
     }
 
     // ------------------------------------------------------------ focus
@@ -282,44 +308,121 @@ public class NoticeSteps {
 
     // ------------------------------------------------------------ attempts and the one retry
 
-    @Given("^the UI double throws on (create|add) for (the first registration-failure notice attempt|both registration-failure notice attempts)$")
-    public void uiThrows(String op, String which) {
+    /** The notice a "... is added first" step named; checked against the add calls the gate made. */
+    private String firstAdded;
+
+    @Given("^the UI double throws on (create|add) for (the first|both) (registration|logging)-failure notice attempts?$")
+    public void uiThrows(String op, String which, String notice) {
         int start = w.scheduler.startIndex;
-        throwOn(start, 1, op);
-        if (which.startsWith("both")) throwOn(start, 2, op);
+        String kind = kindOf(notice);
+        throwOn(start, kind, 1, op);
+        if (which.equals("both")) throwOn(start, kind, 2, op);
+        thatKind = kind;
     }
 
-    @Then("^the first registration-failure notice attempt(?: since the restart)? was made at (\\d+) ms$")
-    public void firstAttemptAt(long t) {
-        List<Fakes.Op> cs = attempts();
-        if (cs.isEmpty()) throw new AssertionError("no registration-failure notice attempt was made");
-        if (cs.get(0).t != t) throw new AssertionError("the first registration-failure notice attempt was made at " + cs.get(0).t + " ms");
+    @Given("^the UI double throws on (create|add) for the first attempt of each notice$")
+    public void uiThrowsEach(String op) {
+        int start = w.scheduler.startIndex;
+        throwOn(start, Fakes.REG, 1, op);
+        throwOn(start, Fakes.LOG, 1, op);
     }
 
-    @Then("no registration-failure notice window exists from {int} ms until {int} ms")
-    public void noWindowBetween(int a, int b) {
+    /** No attempt is named, so every add call (both attempts) or every removal call of that notice throws. */
+    @Given("^the UI double throws on (add|remove) for the (registration|logging)-failure notice$")
+    public void uiThrowsFor(String op, String notice) {
+        int start = w.scheduler.startIndex;
+        String kind = kindOf(notice);
+        if (op.equals("add")) {
+            throwOn(start, kind, 1, "add");
+            throwOn(start, kind, 2, "add");
+        } else {
+            w.notices.removeThrows.put(start + "|" + kind, 1000);
+        }
+        thatKind = kind;
+    }
+
+    @Given("the UI double throws on the logging-failure window's removal at {int} ms")
+    public void uiThrowsLogRemovalAt(int t) {
+        w.notices.removeThrowAt.add(w.scheduler.startIndex + "|" + Fakes.LOG + "|" + t);
+        thatKind = Fakes.LOG;
+    }
+
+    @Given("the UI double throws on removal at {int} ms")
+    public void uiThrowsRemovalAt(int t) {
+        w.notices.removeThrowAt.add(w.scheduler.startIndex + "|*|" + t);
+    }
+
+    @Given("the UI double throws on both removal calls for the logging-failure window")
+    public void uiThrowsBothLogRemovals() {
+        w.notices.removeThrows.put(w.scheduler.startIndex + "|" + Fakes.LOG, 2);
+        thatKind = Fakes.LOG;
+    }
+
+    @Given("^the UI double's measurement of the first (registration|logging)-failure view (throws|returns height 0)$")
+    public void measurementFails(String notice, String how) {
+        String kind = kindOf(notice);
+        String key = w.scheduler.startIndex + "|" + kind + "|1";
+        if (how.equals("throws")) w.notices.throwKeys.add(key + "|measure");
+        else w.notices.zeroMeasure.add(key);
+        thatKind = kind;
+    }
+
+    @Given("^the UI double supplies gravity Gravity\\.TOP and x=40$")
+    public void topGravity() {
+        w.notices.placeGravity = GRAVITY_TOP;
+        w.notices.placeX = 40;
+    }
+
+    /**
+     * Arranges which of two notices due at the same millisecond is added first, using only the receiver's own
+     * paths: with the first focus gain inside the lifecycle, each notice is added the moment its failure is seen;
+     * with the first focus gain after that millisecond's scripted events, both are held while covered and added
+     * on uncovering. Which order each path gives is the receiver's business, so the step tries the path that
+     * matches the wish and "both notice windows exist together" fails if the add calls disagree.
+     * <p>The registration-failure notice is the one {@code Notices.uncovered()} adds first; the logging-failure
+     * notice is the one a failing write of the "ACC registration failed" record adds first.
+     */
+    @Given("^the (registration|logging)-failure notice is added first$")
+    public void addedFirst(String notice) {
+        firstAdded = kindOf(notice);
+        w.focusRank = firstAdded.equals(Fakes.REG) ? VirtualScheduler.AFTER : VirtualScheduler.FIRST;
+    }
+
+    @Then("^the first (registration|logging)-failure notice attempt(?: since the restart)? was made at (\\d+) ms$")
+    public void firstAttemptAt(String notice, long t) {
+        List<Fakes.Op> cs = attempts(kindOf(notice));
+        if (cs.isEmpty()) throw new AssertionError("no " + notice + "-failure notice attempt was made");
+        if (cs.get(0).t != t)
+            throw new AssertionError("the first " + notice + "-failure notice attempt was made at " + cs.get(0).t + " ms");
+    }
+
+    @Then("^no (registration|logging)-failure notice window exists from (\\d+) ms until (\\d+) ms$")
+    public void noWindowBetween(String notice, long a, long b) {
         w.settle();
-        for (Fakes.Window win : w.notices.windows(Fakes.REG, w.scheduler.startIndex))
+        for (Fakes.Window win : w.notices.windows(kindOf(notice), w.scheduler.startIndex))
             if (win.addedAt < b && (win.removedAt < 0 || win.removedAt > a))
-                throw new AssertionError("a registration-failure window was on screen from " + win.addedAt + " ms (removed at "
+                throw new AssertionError("a " + notice + "-failure window was on screen from " + win.addedAt + " ms (removed at "
                         + win.removedAt + " ms)");
     }
 
-    @Then("no registration-failure notice attempt was made from {int} ms to {int} ms")
-    public void noAttemptBetween(int a, int b) {
-        for (Fakes.Op o : attempts())
-            if (o.t >= a && o.t <= b) throw new AssertionError("a registration-failure notice attempt was made at " + o.t + " ms");
+    @Then("^no (registration|logging)-failure notice attempt was made from (\\d+) ms to (\\d+) ms$")
+    public void noAttemptBetween(String notice, long a, long b) {
+        for (Fakes.Op o : attempts(kindOf(notice)))
+            if (o.t >= a && o.t <= b) throw new AssertionError("a " + notice + "-failure notice attempt was made at " + o.t + " ms");
+    }
+
+    @Then("^no (registration|logging)-failure notice attempt was made at (\\d+) ms$")
+    public void noAttemptAt(String notice, long t) {
+        noAttemptBetween(notice, t, t);
     }
 
     @Then("exactly one more attempt, with the same text and form, was made at exactly {int} ms")
     public void oneMoreAttempt(int t) {
-        List<Fakes.Op> cs = attempts();
-        if (cs.size() != 2) throw new AssertionError(cs.size() + " registration-failure notice attempts, at " + times(cs));
+        List<Fakes.Op> cs = twoAttempts(t);
         Fakes.Op first = cs.get(0), retry = cs.get(1);
-        if (retry.t != t) throw new AssertionError("the second attempt was made at " + retry.t + " ms");
         if (first.text == null || !first.text.equals(retry.text))
             throw new AssertionError("attempt texts differ: \"" + first.text + "\" then \"" + retry.text + "\"");
-        Fakes.Op firstAdd = addOf(1), retryAdd = addOf(2);
+        Fakes.Op firstAdd = addOf(thatKind, 1), retryAdd = addOf(thatKind, 2);
         if (retryAdd == null || retryAdd.spec == null) throw new AssertionError("the retry added no window");
         WindowSpec r = retryAdd.spec;
         if (firstAdd != null && firstAdd.spec != null) {
@@ -330,43 +433,81 @@ public class NoticeSteps {
             throw new AssertionError("the retry's window type is " + r.type);
         }
         thatWindow = null;
-        for (Fakes.Window win : w.notices.windows(Fakes.REG, w.scheduler.startIndex)) if (win.attempt == 2) thatWindow = win;
+        for (Fakes.Window win : w.notices.windows(thatKind, w.scheduler.startIndex)) if (win.attempt == 2) thatWindow = win;
         if (thatWindow == null) throw new AssertionError("the retry's window was not added");
+    }
+
+    @Then("exactly one more attempt was made at exactly {int} ms")
+    public void oneMoreAttemptAt(int t) {
+        twoAttempts(t);
+    }
+
+    /** The two attempts of {@link #thatKind}, the second at {@code t}. */
+    private List<Fakes.Op> twoAttempts(long t) {
+        List<Fakes.Op> cs = attempts(thatKind);
+        String name = nameOf(thatKind);
+        if (cs.size() != 2) throw new AssertionError(cs.size() + " " + name + " notice attempts, at " + times(cs));
+        if (cs.get(1).t != t) throw new AssertionError("the second " + name + " attempt was made at " + cs.get(1).t + " ms");
+        return cs;
     }
 
     @Then("that window was removed by one removal call at exactly {int} ms")
     public void thatWindowRemovedAt(int t) {
         w.settle();
-        Fakes.Window win = thatWindow != null ? thatWindow : only(Fakes.REG);
-        if (win.removeCalls.size() != 1 || win.removeCalls.get(0) != t)
-            throw new AssertionError("the registration-failure window added at " + win.addedAt + " ms had removal calls at "
-                    + win.removeCalls + " ms");
+        oneRemovalCall(thatWindow != null ? thatWindow : only(thatKind), t);
     }
 
-    @Then("no further registration-failure notice attempt was made")
-    public void noFurtherAttempt() {
-        List<Fakes.Op> cs = attempts();
-        if (cs.size() != 2) throw new AssertionError(cs.size() + " registration-failure notice attempts, at " + times(cs));
-    }
-
-    @Then("registration-failure notice attempts were made only at {int} ms and {int} ms")
-    public void attemptsOnlyAt(int a, int b) {
-        List<Long> got = times(attempts());
-        if (got.size() != 2 || got.get(0) != a || got.get(1) != b)
-            throw new AssertionError("registration-failure notice attempts were made at " + got + " ms");
-    }
-
-    @Then("no registration-failure notice window exists at any time")
-    public void noRegWindow() {
+    @Then("^the (registration|logging)-failure window was removed by one removal call at exactly (\\d+) ms$")
+    public void kindRemovedByOneCall(String notice, long t) {
         w.settle();
-        List<Fakes.Window> ws = w.notices.windows(Fakes.REG, w.scheduler.startIndex);
-        if (!ws.isEmpty()) throw new AssertionError("registration-failure windows added at " + addedTimes(ws));
+        oneRemovalCall(only(kindOf(notice)), t);
     }
 
-    @Then("no registration-failure notice attempt was made after {int} ms")
-    public void noAttemptAfter(int t) {
-        for (Fakes.Op o : attempts())
-            if (o.t > t) throw new AssertionError("a registration-failure notice attempt was made at " + o.t + " ms");
+    private static void oneRemovalCall(Fakes.Window win, long t) {
+        if (win.removeCalls.size() != 1 || win.removeCalls.get(0) != t || win.removedAt != t)
+            throw new AssertionError("the " + nameOf(win.kind()) + " window added at " + win.addedAt + " ms had removal calls at "
+                    + win.removeCalls + " ms and left the screen at " + win.removedAt + " ms");
+    }
+
+    @Then("^the (registration|logging)-failure window was removed at exactly (\\d+) ms$")
+    public void kindRemovedAt(String notice, long t) {
+        w.settle();
+        Fakes.Window win = only(kindOf(notice));
+        if (win.removedAt != t)
+            throw new AssertionError("the " + notice + "-failure window added at " + win.addedAt + " ms left the screen at "
+                    + win.removedAt + " ms");
+    }
+
+    @Then("^no further (registration|logging)-failure notice attempt was made$")
+    public void noFurtherAttempt(String notice) {
+        List<Fakes.Op> cs = attempts(kindOf(notice));
+        if (cs.size() != 2) throw new AssertionError(cs.size() + " " + notice + "-failure notice attempts, at " + times(cs));
+    }
+
+    @Then("^(registration|logging)-failure notice attempts were made only at (\\d+) ms and (\\d+) ms$")
+    public void attemptsOnlyAt(String notice, long a, long b) {
+        List<Long> got = times(attempts(kindOf(notice)));
+        if (got.size() != 2 || got.get(0) != a || got.get(1) != b)
+            throw new AssertionError(notice + "-failure notice attempts were made at " + got + " ms");
+    }
+
+    @Then("^no (registration|logging)-failure notice window exists at any time$")
+    public void noWindowEver(String notice) {
+        w.settle();
+        List<Fakes.Window> ws = w.notices.windows(kindOf(notice), w.scheduler.startIndex);
+        if (!ws.isEmpty()) throw new AssertionError(notice + "-failure windows added at " + addedTimes(ws));
+    }
+
+    @Then("^no (registration|logging)-failure notice attempt was made after (\\d+) ms$")
+    public void noAttemptAfter(String notice, long t) {
+        for (Fakes.Op o : attempts(kindOf(notice)))
+            if (o.t > t) throw new AssertionError("a " + notice + "-failure notice attempt was made at " + o.t + " ms");
+    }
+
+    @Then("no logging-failure window was added at {int} ms")
+    public void noLogWindowAddedAt(int t) {
+        w.settle();
+        if (windowAddedAt(Fakes.LOG, t) != null) throw new AssertionError("a logging-failure window was added at " + t + " ms");
     }
 
     @Then("no removal call was made at {int} ms")
@@ -376,37 +517,125 @@ public class NoticeSteps {
             if (o.t == t) throw new AssertionError("a removal call was made at " + t + " ms");
     }
 
-    // ------------------------------------------------------------ helpers
-
-    /** The current start's registration-failure notice attempts: one create call each. */
-    private List<Fakes.Op> attempts() {
+    @Then("no removal call was made after {int} ms")
+    public void noRemovalAfter(int t) {
         w.settle();
-        return w.notices.ops("create", Fakes.REG, w.scheduler.startIndex);
+        for (Fakes.Op o : w.notices.ops("remove", null, w.scheduler.startIndex))
+            if (o.t > t) throw new AssertionError("a removal call was made at " + o.t + " ms");
     }
 
-    /** The add call of the current start's registration-failure attempt {@code n}, or null if it made none. */
-    private Fakes.Op addOf(int n) {
-        for (Fakes.Op o : w.notices.ops("add", Fakes.REG, w.scheduler.startIndex)) if (o.attempt == n) return o;
+    @Then("exactly one more removal call was made, at exactly {int} ms")
+    public void oneMoreRemovalCall(int t) {
+        w.settle();
+        Fakes.Window win = thatWindow != null ? thatWindow : only(thatKind);
+        List<Long> calls = win.removeCalls;
+        if (calls.size() != 2 || calls.get(1) != t)
+            throw new AssertionError("the " + nameOf(win.kind()) + " window added at " + win.addedAt + " ms had removal calls at "
+                    + calls + " ms");
+    }
+
+    @Then("removal calls for that window were made only at {int} ms, {int} ms and {int} ms")
+    public void removalCallsOnlyAt(int a, int b, int c) {
+        w.settle();
+        Fakes.Window win = thatWindow != null ? thatWindow : only(thatKind);
+        List<Long> calls = win.removeCalls;
+        if (calls.size() != 3 || calls.get(0) != a || calls.get(1) != b || calls.get(2) != c)
+            throw new AssertionError("the " + nameOf(win.kind()) + " window added at " + win.addedAt + " ms had removal calls at "
+                    + calls + " ms");
+    }
+
+    // ------------------------------------------------------------ two notices on screen
+
+    @Then("both notice windows exist together from {int} ms until {int} ms")
+    public void bothTogether(int a, int b) {
+        w.settle();
+        Fakes.Window reg = only(Fakes.REG), log = only(Fakes.LOG);
+        for (Fakes.Window win : new Fakes.Window[] {reg, log})
+            if (win.addedAt > a || (win.removedAt >= 0 && win.removedAt < b))
+                throw new AssertionError("the " + nameOf(win.kind()) + " window was on screen from " + win.addedAt + " ms until "
+                        + win.removedAt + " ms");
+        if (firstAdded != null) {
+            List<Fakes.Op> adds = new ArrayList<>();
+            for (Fakes.Op o : w.notices.ops("add", null, w.scheduler.startIndex)) adds.add(o);
+            String got = adds.get(0).kind;
+            if (!got.equals(firstAdded))
+                throw new AssertionError("the " + nameOf(got) + " notice was added first, not the " + nameOf(firstAdded)
+                        + " notice; the harness arranged the order through the first focus gain and the receiver did not follow it");
+        }
+    }
+
+    @Then("^both windows have gravity Gravity\\.BOTTOM \\| Gravity\\.CENTER_HORIZONTAL and x=0$")
+    public void bothBottomCentre() {
+        w.settle();
+        for (Fakes.Window win : new Fakes.Window[] {only(Fakes.REG), only(Fakes.LOG)})
+            if (win.spec.gravity != GRAVITY_BOTTOM_CENTRE || win.spec.x != 0)
+                throw new AssertionError("the " + nameOf(win.kind()) + " window has gravity 0x"
+                        + Integer.toHexString(win.spec.gravity) + " and x=" + win.spec.x);
+    }
+
+    @Then("no updateViewLayout call was made")
+    public void noUpdateViewLayout() {
+        w.settle();
+        if (w.notices.updateViewLayoutCalls != 0)
+            throw new AssertionError(w.notices.updateViewLayoutCalls + " updateViewLayout calls were made");
+    }
+
+    @Then("^the (registration|logging)-failure window has y=(Y\\+H|Y)$")
+    public void windowY(String notice, String y) {
+        w.settle();
+        Fakes.Window win = only(kindOf(notice));
+        int want = y.equals("Y") ? PLACEMENT_Y : PLACEMENT_Y + MEASURED_H;
+        if (win.spec.y != want) throw new AssertionError("the " + notice + "-failure window has y=" + win.spec.y + ", not " + want);
+    }
+
+    @Then("^the logging-failure window has y=Y\\+H from (\\d+) ms to (\\d+) ms$")
+    public void logRaisedBetween(long a, long b) {
+        w.settle();
+        Fakes.Window win = only(Fakes.LOG);
+        if (!win.onScreenAt(a) || !win.onScreenAt(b - 1))
+            throw new AssertionError("the logging-failure window was on screen from " + win.addedAt + " ms until " + win.removedAt
+                    + " ms");
+        if (win.spec.y != PLACEMENT_Y + MEASURED_H)
+            throw new AssertionError("the logging-failure window has y=" + win.spec.y);
+        if (w.notices.updateViewLayoutCalls != 0) throw new AssertionError("the window's layout was updated");
+    }
+
+    // ------------------------------------------------------------ helpers
+
+    /** The current start's notice attempts of {@code kind}: one create call each. */
+    private List<Fakes.Op> attempts(String kind) {
+        w.settle();
+        return w.notices.ops("create", kind, w.scheduler.startIndex);
+    }
+
+    /** The add call of the current start's attempt {@code n} of {@code kind}, or null if it made none. */
+    private Fakes.Op addOf(String kind, int n) {
+        for (Fakes.Op o : w.notices.ops("add", kind, w.scheduler.startIndex)) if (o.attempt == n) return o;
         return null;
     }
 
-    private void throwOn(int start, int attempt, String op) {
-        w.notices.throwKeys.add(start + "|" + Fakes.REG + "|" + attempt + "|" + op);
+    private void throwOn(int start, String kind, int attempt, String op) {
+        w.notices.throwKeys.add(start + "|" + kind + "|" + attempt + "|" + op);
     }
 
-    private Fakes.Window windowAddedAt(long t) {
-        for (Fakes.Window win : w.notices.windows(Fakes.REG, w.scheduler.startIndex)) if (win.addedAt == t) return win;
+    private Fakes.Window windowAddedAt(String kind, long t) {
+        for (Fakes.Window win : w.notices.windows(kind, w.scheduler.startIndex)) if (win.addedAt == t) return win;
         return null;
     }
 
     private Fakes.Op requireAdd() {
-        if (thatAdd == null) throw new IllegalStateException("no step named the registration-failure add call");
+        if (thatAdd == null) throw new IllegalStateException("no step named the notice's add call");
         return thatAdd;
     }
 
     private Fakes.Window requireWindow() {
-        if (thatWindow == null) throw new IllegalStateException("no step named the registration-failure window");
+        if (thatWindow == null) throw new IllegalStateException("no step named the notice's window");
         return thatWindow;
+    }
+
+    /** "registration-failure" or "logging-failure", for messages. */
+    private static String nameOf(String kind) {
+        return Fakes.LOG.equals(kind) ? "logging-failure" : "registration-failure";
     }
 
     static List<Long> times(List<Fakes.Op> ops) {
@@ -434,7 +663,7 @@ public class NoticeSteps {
     }
 
     private static String kindOf(String which) {
-        return "logging".equals(which) ? Fakes.LOG : Fakes.REG;
+        return which.startsWith("logging") ? Fakes.LOG : Fakes.REG;
     }
 
     private static int number(String n) {

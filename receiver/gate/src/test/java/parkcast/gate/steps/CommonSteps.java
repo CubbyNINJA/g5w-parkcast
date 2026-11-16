@@ -232,6 +232,12 @@ public class CommonSteps {
         scriptAcc(st, t);
     }
 
+    /** The change is scripted and nothing later is: ACC stays at that status to the end of the run. */
+    @Given("ACC status changes to {int} at {int} ms and never resumes")
+    public void accChangesNoResume(int st, int t) {
+        scriptAcc(st, t);
+    }
+
     @Given("ACC status changes to {int} at {int} ms and to {int} at {int} ms")
     public void accChangesTwice(int st1, int t1, int st2, int t2) {
         scriptAcc(st1, t1);

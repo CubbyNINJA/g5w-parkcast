@@ -25,8 +25,14 @@ public class GateMiscSteps {
     /** When the receiver was told to exit, once a step made it exit. */
     private long exitedAt = -1;
 
-    public GateMiscSteps(World w) {
+    /** For the logging-failure steps of the previous app start (l.316, l.473 of 11). */
+    private final LogSteps logSteps;
+    private final CommonSteps common;
+
+    public GateMiscSteps(World w, LogSteps logSteps, CommonSteps common) {
         this.w = w;
+        this.logSteps = logSteps;
+        this.common = common;
     }
 
     // ------------------------------------------------------------ ACC broadcasts with the check off
@@ -79,13 +85,14 @@ public class GateMiscSteps {
         w.runFor(t + 10000L);
     }
 
-    @Then("no registration-failure notice window exists after exit")
-    public void noRegWindowAfterExit() {
+    @Then("^no (registration|logging)-failure notice window exists after exit$")
+    public void noWindowAfterExit(String which) {
         if (exitedAt < 0) throw new IllegalStateException("no step made the receiver exit");
-        for (Fakes.Window win : w.notices.windows(Fakes.REG, w.scheduler.startIndex)) {
-            if (win.addedAt > exitedAt) throw new AssertionError("a registration-failure window was added at " + win.addedAt + " ms");
+        String kind = "registration".equals(which) ? Fakes.REG : Fakes.LOG;
+        for (Fakes.Window win : w.notices.windows(kind, w.scheduler.startIndex)) {
+            if (win.addedAt > exitedAt) throw new AssertionError("a " + which + "-failure window was added at " + win.addedAt + " ms");
             if (win.removedAt < 0 || win.removedAt > exitedAt)
-                throw new AssertionError("the registration-failure window added at " + win.addedAt + " ms was still on screen after exit");
+                throw new AssertionError("the " + which + "-failure window added at " + win.addedAt + " ms was still on screen after exit");
         }
     }
 
@@ -101,16 +108,62 @@ public class GateMiscSteps {
         w.runFor(3000);
     }
 
+    /**
+     * The later app starts made no removal call for a window the previous start added. The previous start's own
+     * exit may remove its windows (l.456 of 11 requires it), so its removal calls are not counted (l.473 of 11).
+     */
     @Then("no removal call was made for any window of the previous app start")
     public void noRemovalOfPreviousStart() {
         if (previousStart < 0) throw new IllegalStateException("no step ran a previous app start");
         w.settle();
+        for (Fakes.Op o : w.notices.ops("remove", null, null)) {
+            if (o.start <= previousStart) continue;
+            for (Fakes.Window win : w.notices.windows)
+                if (win.start == previousStart && win.view == o.view)
+                    throw new AssertionError("start " + o.start + " made a removal call at " + o.t
+                            + " ms for the previous start's window added at " + win.addedAt + " ms");
+        }
+    }
+
+    /** The next "the receiver starts again ..." makes the exit at {@code t}: restart exits the old receiver then. */
+    @Given("during the previous app start the first logging-failure notice attempt failed and exit came at {int} ms")
+    public void previousStartLogAttemptFailed(int t) {
+        previousStart = w.scheduler.startIndex;
+        common.checkOnSupported();
+        logSteps.writeFailsAt(1000);
+        w.notices.throwKeys.add(previousStart + "|" + Fakes.LOG + "|1|add");
+        w.runFor(t);
+    }
+
+    /** The next "the receiver starts again" makes the exit at {@code t}; that exit removes the notice. */
+    @Given("during the previous app start a logging-failure notice was shown and exit came at {int} ms")
+    public void previousStartLogNoticeShown(int t) {
+        previousStart = w.scheduler.startIndex;
+        common.checkOnPermittedAtZero();
+        logSteps.writeFailsAt(1000);
+        w.runFor(t);
+        if (w.notices.windows(Fakes.LOG, previousStart).size() != 1)
+            throw new AssertionError("the previous app start showed no single logging-failure notice");
+    }
+
+    @When("the receiver starts again and a log write fails at {int} ms")
+    public void startsAgainLogFails(int t) {
+        w.restart();
+        logSteps.writeFailsAt(t);
+    }
+
+    @When("the receiver starts again")
+    public void startsAgainPlain() {
+        w.restart();
+    }
+
+    @Then("no window of the previous app start is on screen")
+    public void noPreviousWindowOnScreen() {
+        if (previousStart < 0) throw new IllegalStateException("no step ran a previous app start");
+        w.settle();
         for (Fakes.Window win : w.notices.windows)
-            if (win.start == previousStart && !win.removeCalls.isEmpty())
-                throw new AssertionError("the previous start's window added at " + win.addedAt + " ms had removal calls at "
-                        + win.removeCalls + " ms");
-        int prevOps = w.notices.ops("remove", null, previousStart).size();
-        if (prevOps != 0) throw new AssertionError(prevOps + " removal calls were made during the previous app start");
+            if (win.start == previousStart && win.removedAt < 0)
+                throw new AssertionError("the previous start's window added at " + win.addedAt + " ms is still on screen");
     }
 
     @Then("^(?:the )?exit completes(?: without waiting for the retry)?$")
@@ -478,11 +531,16 @@ public class GateMiscSteps {
 
     // ------------------------------------------------------------ AT-27: never the HUD
 
-    @Given("^the parking check is (on|off) and mirrored video is permitted$")
-    public void checkAndPermitted(String state) {
+    /** Blocked means out of Park from the start: the first reading at 0 ms says 0, and so does every later one. */
+    @Given("^the parking check is (on|off) and mirrored video is (permitted|blocked)$")
+    public void checkAndPermitted(String state, String video) {
         checkOnSupportedBuild("on".equals(state));
-        w.park.byStart.put(0L, Fakes.Reply.valueAfter(1, 10));
+        boolean blocked = "blocked".equals(video);
+        if (blocked) w.park.gear = 0;
+        w.park.byStart.put(0L, Fakes.Reply.valueAfter(blocked ? 0 : 1, 10));
         w.session.active = true;
+        w.gateCheck = state;
+        w.gateVideo = video;
     }
 
     @When("the receiver shows frames for {int} ms")

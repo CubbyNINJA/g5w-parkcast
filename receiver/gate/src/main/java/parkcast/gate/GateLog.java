@@ -15,6 +15,8 @@ import parkcast.gate.port.Scheduler;
  * record is not retried, later records are still attempted, and no exception text is ever written.
  */
 public final class GateLog {
+    /** The receiver's log folder on the unit, which the {@link LogFiles} port maps its files to. */
+    static final String FOLDER = "/data/nemesis/logs/airplay-receiver/";
     /** The current log file in the receiver's log folder. */
     static final String FILE = "receiver.log";
     /** No log file may hold more than this many bytes (AIR-039). */
@@ -33,7 +35,15 @@ public final class GateLog {
 
     /** Writes one record. Never throws; a failure is reported as a logging failure. */
     public void record(String line) {
-        byte[] b = encode(line);
+        put(encode(line));
+    }
+
+    /**
+     * Writes one encoded record, terminator included, or its "record too large" replacement. Package-private
+     * so the size scenarios can write records of an exact byte count, which the time prefix rules out below
+     * a few bytes.
+     */
+    void put(byte[] b) {
         if (b.length > FILE_CAP) b = encode("record too large " + b.length);
         write(b);
     }

@@ -453,8 +453,7 @@ public class ConfigSteps {
 
     @Given("no log from the earlier run is present")
     public void noEarlierLog() {
-        w.logs.lines.clear();
-        w.logs.sizes.clear();
+        w.logs.clear();
     }
 
     @Then("^the start record gives the parking check as (on|off), as the startup value$")
