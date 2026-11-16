@@ -298,14 +298,15 @@ public class SleepSteps {
 
     // ------------------------------------------------------------ notices
 
-    @Then("no registration-failure notice was shown at any time")
-    public void noRegNotice() {
+    @Then("^no (registration|logging)-failure notice was shown at any time$")
+    public void noRegNotice(String which) {
         w.settle();
+        String kind = "logging".equals(which) ? Fakes.LOG : Fakes.REG;
         for (Fakes.Op o : w.notices.ops)
-            if ("add".equals(o.op) && Fakes.REG.equals(o.kind))
-                throw new AssertionError("registration-failure notice added at " + o.t + " ms");
+            if ("add".equals(o.op) && kind.equals(o.kind))
+                throw new AssertionError(which + "-failure notice added at " + o.t + " ms");
         for (Fakes.Window win : w.notices.windows)
-            if (Fakes.REG.equals(win.kind())) throw new AssertionError("registration-failure notice window was created");
+            if (kind.equals(win.kind())) throw new AssertionError(which + "-failure notice window was created");
     }
 
     @Then("the synthetic notice output is empty")
