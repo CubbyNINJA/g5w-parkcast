@@ -457,7 +457,7 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Given the parking check is <check>, on a supported build
     And ACC registration returns sticky status 0 at 300 ms
     When the receiver runs for 700 ms with mirroring active
-    Then the Park getter was called only at 300 and 500 ms
+    Then the Park getter was called only at 300, 500 and 700 ms
     And <gate>
 
     Examples:
@@ -684,7 +684,7 @@ Feature: Mirrored video only in Park, read from the stock Park getter
     Given the parking check is on, on a supported build
     And ACC registration <failure> at 0 ms
     And writing the "ACC registration failed" record fails
-    When the receiver runs for 2000 ms
+    When the receiver runs for 6000 ms
     Then exactly one registration-failure notice was shown, at 0 ms, with text exactly "Mirroring is off: the car's power state couldn't be read. Restart the receiver from NEMESIS Manager."
     And exactly one logging-failure notice was shown, at 0 ms, with text exactly "Receiver logging stopped working. Mirroring is unaffected."
     And each notice was added as its own window

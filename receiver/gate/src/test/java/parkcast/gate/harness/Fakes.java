@@ -311,7 +311,8 @@ public final class Fakes {
         }
 
         private void note(AccStatus st, boolean change) {
-            boolean a = st.isInteger() && st.value() == 0;
+            // AIR-019(f): 0 (ACC on), 2 (ADM) and 5 (system ready) are awake; everything else is asleep.
+            boolean a = st.isInteger() && (st.value() == 0 || st.value() == 2 || st.value() == 5);
             if (a && !awake) {
                 resumeAt = s.now();
                 if (change) changeResumeAt = s.now();
@@ -548,14 +549,25 @@ public final class Fakes {
             for (String l : text.split("\r?\n")) if (!l.isEmpty()) lines.add(new Line(s.startIndex, s.now(), name, l));
         }
 
+        /** The older file kept by the last rotation, named after the current file. */
+        public static String older(String current) {
+            return current + ".1";
+        }
+
+        private String current = "receiver.log";
+
         @Override
         public void rotate() {
             rotations++;
+            for (String name : new ArrayList<>(sizes.keySet())) if (!name.endsWith(".1")) current = name;
+            sizes.put(older(current), size(current));
+            sizes.put(current, 0L);
         }
 
         @Override
         public void deleteOlder() {
             deletions++;
+            sizes.remove(older(current));
         }
 
         public List<Line> containing(String x) {
@@ -755,11 +767,17 @@ public final class Fakes {
         public ReverseListener listener;
         public int registers, unregisters;
 
+        /** REVERSE_ON is not sticky, so by default registration returns no intent (11's preamble). */
+        public boolean returnsIntent;
+        /** Makes registration throw (AIR-041(j)). */
+        public boolean throwsOnRegister;
+
         @Override
         public boolean register(ReverseListener l) {
-            listener = l;
             registers++;
-            return true;
+            if (throwsOnRegister) throw new IllegalStateException("synthetic REVERSE_ON registration failure");
+            listener = l;
+            return returnsIntent;
         }
 
         @Override

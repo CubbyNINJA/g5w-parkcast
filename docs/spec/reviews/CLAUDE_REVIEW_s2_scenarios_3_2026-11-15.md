@@ -98,3 +98,13 @@ B. Paste after scenario A. It covers AIR-041(a) "with no gain after a REVERSE_ON
 - Whether the OD-66 harness has a lifecycle double (scenario A), and whether the "built manifest" scan in 11:890 needs the Android toolchain.
 - AT-41 cites `CAMERA_SIGNAL_FINDINGS.md:16-39` and AIR-041(g) cites `:11,16-47`. I read the file but did not check those line ranges against its current numbering.
 - No step definitions or receiver code exist, so no current behaviour is cited.
+
+## Corrections after this review (2026-11-16)
+
+Found while implementing the gate for 09; both are arithmetic errors this review's arithmetic check missed.
+No behaviour changed.
+
+- `09_parking_gate.feature:460`: "called only at 300 and 500 ms" after running for 700 ms is now "300, 500
+  and 700 ms". Runs include time N (09:13) and the 200 ms schedule from the 300 ms re-read puts a call at 700.
+- `09_parking_gate.feature:687`: the run is now 6000 ms, not 2000 ms, so the removal calls at exactly 5000 ms
+  that the scenario asserts can happen within it.

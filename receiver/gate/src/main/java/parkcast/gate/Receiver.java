@@ -16,8 +16,15 @@ import parkcast.gate.port.VehicleBus;
 
 /**
  * The receiver's lifecycle as the gate sees it: the activity callbacks, each frame, and exit.
- * The mirror session and the vehicle bus are handed in so the scenarios can prove nothing reaches them.
- * Skeleton: no logic yet.
+ *
+ * <p>{@code onCreate} reads the flag, identifies the build, logs the start, starts regulation logging and
+ * registers the {@code REVERSE_ON} receiver, so that registration returns before the window can gain focus.
+ * {@code onResume} registers for the ACC broadcast; the Park poller makes no call until that registration
+ * reports the car awake. Frames pass through the gate. Exit is synchronous and makes every unregister and
+ * notice removal call at the clock time it starts.
+ *
+ * <p>The mirror session and the vehicle bus are handed in so the scenarios can prove nothing reaches them:
+ * the gate never mutes, stops or disconnects audio or the iPhone connection, and writes nothing to the car.
  */
 public final class Receiver {
     private final Scheduler scheduler;
@@ -33,6 +40,19 @@ public final class Receiver {
     private final MirrorSession session;
     private final VehicleBus vehicle;
     private final int displayWidth;
+
+    private final GateLog log;
+    private final Notices notices;
+    private final ReceiverConfig flag;
+    private final ParkPoller poller;
+    private final ParkingGate gate;
+    private final AccState accState;
+    private final Cover cover;
+    private final RegulationLog regulationLog;
+
+    private boolean created;
+    private boolean resumed;
+    private boolean exited;
 
     public Receiver(Scheduler scheduler, ParkGetter park, AccSource acc, ReverseSource reverse,
             NoticeWindows windows, LogFiles logs, ConfigFile config, BuildInfo build, RegulationSource regulation,
@@ -50,29 +70,69 @@ public final class Receiver {
         this.session = session;
         this.vehicle = vehicle;
         this.displayWidth = displayWidth;
+
+        this.log = new GateLog(logs, scheduler);
+        this.notices = new Notices(windows, scheduler, displayWidth);
+        this.log.setNotices(notices);
+        this.flag = new ReceiverConfig(config);
+        this.poller = new ParkPoller(scheduler, park, log);
+        this.gate = new ParkingGate(display, poller, flag, build, log);
+        this.poller.setListener(gate);
+        this.accState = new AccState(acc, flag, log, notices, poller);
+        this.cover = new Cover(reverse, log, notices);
+        this.regulationLog = new RegulationLog(regulation, log);
     }
 
+    /** Reads the flag, sets and logs the initial gate state, and registers the {@code REVERSE_ON} receiver. */
     public void onCreate() {
-        throw new UnsupportedOperationException("not implemented: Receiver.onCreate");
+        if (created || exited) return;
+        created = true;
+        flag.load();
+        boolean on = flag.requirePark();
+        if (!on) log.record("parking check off");
+        gate.start();
+        log.record("start check=" + onOff(on) + " gate=" + ParkingGate.state(gate.permitted())
+                + " reason=" + flag.reason());
+        log.record("flag prev=unknown new=" + onOff(on) + " cause=startup value");
+        regulationLog.start();
+        cover.register();
+        poller.start();
     }
 
     public void onStart() {
-        throw new UnsupportedOperationException("not implemented: Receiver.onStart");
+        // Nothing to do: registration for the ACC broadcast waits for onResume.
     }
 
+    /** Registers for the ACC broadcast once per app start. */
     public void onResume() {
-        throw new UnsupportedOperationException("not implemented: Receiver.onResume");
+        if (!created || resumed || exited) return;
+        resumed = true;
+        accState.register();
     }
 
     public void onWindowFocusChanged(boolean hasFocus) {
-        throw new UnsupportedOperationException("not implemented: Receiver.onWindowFocusChanged");
+        if (exited) return;
+        cover.focusChanged(hasFocus);
     }
 
+    /** Shows the frame only while the gate permits video. */
     public void onFrame(Frame f) {
-        throw new UnsupportedOperationException("not implemented: Receiver.onFrame");
+        if (exited) return;
+        gate.onFrame(f);
     }
 
+    /** Synchronous exit: unregisters, removes notice windows and stops polling, all at this clock time. */
     public void exit() {
-        throw new UnsupportedOperationException("not implemented: Receiver.exit");
+        if (exited) return;
+        exited = true;
+        cover.exit();
+        accState.unregister();
+        notices.exit();
+        poller.stop();
+        regulationLog.stop();
+    }
+
+    private static String onOff(boolean on) {
+        return on ? "on" : "off";
     }
 }
