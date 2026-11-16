@@ -13,8 +13,9 @@ import parkcast.gate.port.ReverseSource;
  * starts ends only at a focus gain.
  *
  * <p>Each change is applied to the notices before it is logged, so a failed write's logging-failure notice
- * is held while covered. The covered state at process start is not logged. Nothing here touches the gate,
- * the flag value, polling, ACC registration, audio or the iPhone connection.
+ * is held while covered. The covered state at process start is not logged, and neither is the uncover that
+ * ends it (normally the first focus gain): that is the start, not a change. Every later change is logged.
+ * Nothing here touches the gate, the flag value, polling, ACC registration, audio or the iPhone connection.
  */
 public final class Cover {
     private final ReverseSource reverse;
@@ -30,6 +31,8 @@ public final class Cover {
     /** The registration returned: unregister once at exit. */
     private boolean registered;
     private boolean exited;
+    /** The covered period that began at process start has ended, so every later change is logged. */
+    private boolean startCoverEnded;
 
     public Cover(ReverseSource reverse, GateLog log, Notices notices) {
         this.reverse = reverse;
@@ -71,7 +74,8 @@ public final class Cover {
             log.record("notice cover covered=yes cause=focus");
         } else {
             notices.uncovered();
-            log.record("notice cover covered=no cause=focus");
+            if (startCoverEnded) log.record("notice cover covered=no cause=focus");
+            startCoverEnded = true;
         }
     }
 

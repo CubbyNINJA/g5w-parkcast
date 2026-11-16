@@ -502,19 +502,34 @@ public class LogSteps {
             "the UI double throws on both removal calls for the logging-failure window",
             "the UI double throws on add for the first logging-failure notice attempt"));
 
+    /**
+     * Covering (l.901 of 11): the focus changes and broadcasts a scenario scripts through {@code CoverHarnessA}.
+     * The twin never scripts them, so leaving them out is the whole difference.
+     */
+    private static final String COVERING = "covering";
+
     /** Every logging fault this scenario scripted through {@link #faultAt}, as {start, fault, t}, for the twin to replay. */
     private final List<Object[]> scriptedFaults = new ArrayList<>();
 
+    /** Times of the "write" faults scripted for the current start, whichever step scripted them. */
+    public List<Long> writeFaultTimes() {
+        List<Long> out = new ArrayList<>();
+        for (Object[] f : scriptedFaults)
+            if ((Integer) f[0] == w.scheduler.startIndex && "write".equals(f[1])) out.add((Long) f[2]);
+        return out;
+    }
+
     /**
-     * Replays the scenario's setup on a fresh World without {@code fault}: the parking check and video state the
-     * "parking check is X and mirrored video is Y" step set, and the same logging faults at the same times. Both
-     * runs end at the same time; then the five traces are compared. Faults this step cannot leave out (covering,
-     * l.907, is AT-41) are refused rather than compared.
+     * Replays the scenario's setup on a fresh World without {@code fault}, with the same logging faults at the
+     * same times. The setup is the "parking check is X and mirrored video is Y" step when the scenario used it,
+     * else the receiver.conf, build, first focus gain, Park replies and session state copied from this run. Both
+     * runs end at the same time; then the five traces are compared.
      */
     @Then("^the gate decision, effective flag value, Park getter schedule, registration calls, and audio and connection traces match a run without (.+)$")
     public void matchesTwinWithout(String fault) {
-        if (!TWIN_FAULTS.contains(fault)) throw new IllegalArgumentException("unsupported fault: " + fault);
-        if (w.gateCheck == null)
+        boolean covering = COVERING.equals(fault);
+        if (!covering && !TWIN_FAULTS.contains(fault)) throw new IllegalArgumentException("unsupported fault: " + fault);
+        if (!covering && w.gateCheck == null)
             throw new IllegalStateException("the twin run needs the \"parking check is X and mirrored video is Y\" setup");
         w.settle();
         World t = new World();
@@ -522,14 +537,18 @@ public class LogSteps {
             throw new IllegalStateException("the twin run does not replay restarts");
         CommonSteps tc = new CommonSteps(t);
         LogSteps tl = new LogSteps(t, tc);
-        new GateMiscSteps(t, tl, tc).checkAndPermitted(w.gateCheck, w.gateVideo);
+        if (w.gateCheck != null) new GateMiscSteps(t, tl, tc).checkAndPermitted(w.gateCheck, w.gateVideo);
+        else copySetup(w, t);
         for (Object[] f : scriptedFaults) {
             if ((Integer) f[0] != w.scheduler.startIndex)
                 throw new IllegalStateException("the twin run does not replay faults of an earlier start");
             tl.faultAt((String) f[1], (Long) f[2]);
         }
         t.runFor(w.ranUntil);
-        if (noticeTrace(w).equals(noticeTrace(t)))
+        if (covering) {
+            if (coverTrace(w).equals(coverTrace(t)))
+                throw new IllegalStateException("covering changed nothing in the cover records: " + coverTrace(w));
+        } else if (noticeTrace(w).equals(noticeTrace(t)))
             throw new IllegalStateException("\"" + fault + "\" changed nothing in the notice double: " + noticeTrace(w));
         java.util.Map<String, String> a = traces(w), b = traces(t);
         for (String k : a.keySet())
@@ -559,6 +578,42 @@ public class LogSteps {
         m.put("the registration calls", r.toString());
         m.put("the audio and connection traces", x.session.counts + " reconnects=" + x.session.reconnects);
         return m;
+    }
+
+    /**
+     * The inputs a scenario without the "parking check is X and mirrored video is Y" step sets before the start.
+     * Park replies this copy does not carry are refused rather than silently dropped.
+     */
+    private static void copySetup(World from, World to) {
+        Fakes.Park p = from.park;
+        if (p.reread != null || !p.byIndex.isEmpty() || !p.chain.isEmpty() || !p.rereadNext.isEmpty()
+                || !p.rankAt.isEmpty() || p.lostAt != -1)
+            throw new IllegalStateException("the twin run replays only constant and per-start Park replies");
+        to.config.text = from.config.text;
+        to.config.missing = from.config.missing;
+        to.config.unreadable = from.config.unreadable;
+        to.build.product = from.build.product;
+        to.build.missing = from.build.missing;
+        to.build.unreadable = from.build.unreadable;
+        to.focusAt = from.focusAt;
+        to.focusRank = from.focusRank;
+        to.displayWidth = from.displayWidth;
+        to.settleMs = from.settleMs;
+        to.park.gear = p.gear;
+        to.park.immediate = p.immediate;
+        to.park.missing = p.missing;
+        to.park.constant = p.constant;
+        to.park.byStart.putAll(p.byStart);
+        to.session.active = from.session.active;
+        to.session.audioPlaying = from.session.audioPlaying;
+    }
+
+    /** The cover and REVERSE_ON records of the current start, to show that covering did something. */
+    private static String coverTrace(World x) {
+        List<String> out = new ArrayList<>();
+        for (Fakes.Line l : x.lines())
+            if (l.text.contains("notice cover") || l.text.contains("reverse_on received")) out.add(l.toString());
+        return out.toString();
     }
 
     /** The logging-failure notice calls and windows of the current start, to show a dropped fault did something. */

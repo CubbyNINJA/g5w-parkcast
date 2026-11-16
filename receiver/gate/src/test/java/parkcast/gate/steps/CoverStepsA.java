@@ -3,7 +3,6 @@ package parkcast.gate.steps;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -133,7 +132,7 @@ public class CoverStepsA {
     @Then("exit makes no held attempt")
     public void exitMakesNoHeldAttempt() {
         w.settle();
-        long exit = exitedAt();
+        long exit = misc.exitedAt();
         for (Fakes.Op o : ops(null))
             if (o.t >= exit && !o.op.equals("remove"))
                 throw new AssertionError("a " + o.op + " call for the " + o.kind + " notice was made at " + o.t
@@ -316,7 +315,7 @@ public class CoverStepsA {
         o.focusAt = w.focusAt;
         o.focusRank = w.focusRank;
         Replay r = new Replay(o);
-        for (long t : scriptedWriteFaults()) r.log.writeFailsAt(t);
+        for (long t : logSteps.writeFaultTimes()) r.log.writeFailsAt(t);
         for (Consumer<Replay> c : replay) c.accept(r);
         o.runFor(w.ranUntil);
         String with = trace(w), without = trace(o);
@@ -351,34 +350,6 @@ public class CoverStepsA {
 
     private void writeFails(long t) {
         logSteps.writeFailsAt(t);
-    }
-
-    /** Write-fault times LogSteps scripted for the current start, whichever step scripted them. */
-    @SuppressWarnings("unchecked")
-    private List<Long> scriptedWriteFaults() {
-        try {
-            Field f = LogSteps.class.getDeclaredField("scriptedFaults");
-            f.setAccessible(true);
-            List<Long> out = new ArrayList<>();
-            for (Object[] x : (List<Object[]>) f.get(logSteps))
-                if (((Number) x[0]).intValue() == w.scheduler.startIndex && "write".equals(x[1]))
-                    out.add(((Number) x[2]).longValue());
-            return out;
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("cannot read the scripted log faults from LogSteps", e);
-        }
-    }
-
-    private long exitedAt() {
-        try {
-            Field f = GateMiscSteps.class.getDeclaredField("exitedAt");
-            f.setAccessible(true);
-            long t = f.getLong(misc);
-            if (t < 0) throw new IllegalStateException("no step made the receiver exit");
-            return t;
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("cannot read the exit time from GateMiscSteps", e);
-        }
     }
 
     private List<Fakes.Op> ops(String op) {

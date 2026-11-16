@@ -25,6 +25,12 @@ public class GateMiscSteps {
     /** When the receiver was told to exit, once a step made it exit. */
     private long exitedAt = -1;
 
+    /** When the receiver was told to exit; throws if no step made it exit. */
+    public long exitedAt() {
+        if (exitedAt < 0) throw new IllegalStateException("no step made the receiver exit");
+        return exitedAt;
+    }
+
     /** For the logging-failure steps of the previous app start (l.316, l.473 of 11). */
     private final LogSteps logSteps;
     private final CommonSteps common;
