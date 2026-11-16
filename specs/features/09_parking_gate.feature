@@ -10,8 +10,8 @@ Feature: Mirrored video only in Park, read from the stock Park getter
   Times are in milliseconds on a controlled clock. "Within 10 ms" means a reply received 10 ms
   after the call starts. A supported build is one whose ro.build.product starts with "CVEV.".
 
-  "Runs for N ms" covers clock times 0 to N inclusive. "Was called only at" lists every call started
-  in that span and no others.
+  "Runs for N ms" covers clock times 0 to N inclusive. "Was called only at" and "were made only at"
+  list every call started in that span, exactly one call at each listed time, and no others.
 
   Unless a step says otherwise, the car is in Park, the build is supported, and every Park getter
   call replies with the car's gear state (1 in Park, 0 out of it) within 10 ms. "Video is permitted
@@ -31,12 +31,14 @@ Feature: Mirrored video only in Park, read from the stock Park getter
   (OD-106). The logging-failure notice's text is exactly "Receiver logging stopped working. Mirroring is unaffected."
   (OD-112). The UI double stands in for the window manager and the toast-view factory. Unless a step
   says otherwise it supplies gravity Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, x=0, y=Y and a
-  measured view height H, and it records every add, removal and updateViewLayout call. "Shown at S"
-  means that notice's add call returned at S ms. "An attempt fails" means the UI double threw on its
-  create, measure or add call, so no window of it exists. Unless a step says otherwise the receiver's
-  activity window has focus throughout, so it is not covered (AIR-041). With the check off, a
-  registration failure shows no registration-failure notice, and with no logging fault the synthetic
-  notice output stays empty (AIR-021(b), OD-103).
+  measured view height H, and it records every add, removal and updateViewLayout call, and it also
+  records any Toast.show() call, any window of another type, and any dialog, notification or
+  activity start. "Shown at S" means that notice's add call returned at S ms. "An attempt fails"
+  means the UI double threw on its create, measure or add call, so no window of it exists. Unless a
+  step says otherwise, at 0 ms the REVERSE_ON registration call returns, then the receiver's window
+  gains focus, then the ACC registration call returns; the window keeps focus, so it is not covered
+  (AIR-041). With the check off, a registration failure shows no registration-failure notice, and
+  with no logging fault the synthetic notice output stays empty (AIR-021(b), OD-103).
 
   Log records are matched on literal tokens (OD-104, OD-105). A record that contains "discarded"
   also contains "during sleep" or "after resume", and not the other. A record that contains

@@ -250,8 +250,8 @@ Feature: The parking gate on the owner's head unit
     Then the stick evidence and an independent observation show the notice gone no later than the camera image
     And the notice was never seen over the camera image
     And the receiver's records hold "reverse_on received" and a "notice cover" record with "covered=yes" and "cause=reverse"
-    And those records are timed at or after the PgsService REVERSE_ON log line and before AvmCamera takes focus
-    And the receiver's records hold a "notice cover" record with "covered=no" after the AvmMode REVERSE_OFF log line, when focus returns
+    And those records are timed at or after the PgsService REVERSE_ON log line and no later than the first focus sample showing AvmCamera
+    And the receiver's records hold a "notice cover" record with "covered=no" and "cause=focus", timed no earlier than the last focus sample showing AvmCamera and no later than the first focus sample back on another window after it
 
   @failure @AIR-041 @AT-41 @OD-124 @OD-130
   Scenario: A reversing run with no "reverse_on received" record fails

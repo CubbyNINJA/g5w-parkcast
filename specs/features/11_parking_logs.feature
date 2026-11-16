@@ -9,19 +9,21 @@ Feature: Regulation evidence, the log cap and logging failures
 
   Clock times, "runs for", "within 10 ms", the default Park getter behaviour, the ACC registration
   steps, the two on-screen notices and their texts, the UI double, "shown at S", "an attempt fails"
-  and the default of focus throughout are as defined in 09_parking_gate.feature.
+  and the default focus order at 0 ms are as defined in 09_parking_gate.feature.
 
   The focus double delivers onWindowFocusChanged(true) ("the receiver's window gains focus") and
   onWindowFocusChanged(false) ("the receiver's window loses focus") to the synthetic receiver window
   at the stated clock times. The broadcast double delivers com.hkmc.intent.action.REVERSE_ON and
   com.hkmc.intent.action.REVERSE_OFF intents to the receiver's runtime receiver at the stated clock
-  times, and can make that receiver's registration throw or return an intent. Unless a step says
-  otherwise the REVERSE_ON registration returns null. "Covered" is as AIR-041 defines it: from a
-  focus loss until the next focus gain, from a REVERSE_ON until the next focus gain, from a
-  registration that returns an intent until the next focus gain, and for the whole run if that
-  registration throws (OD-120, OD-124, OD-128, OD-129). A notice attempt that falls due while the
-  receiver is covered is "held": nothing is created, and the attempt is made at the next focus gain
-  (OD-122).
+  times, and can make that receiver's registration throw or return an intent. The lifecycle double
+  drives the receiver's activity glue through onCreate, onStart and onResume and the focus
+  callbacks, and records the order in which those calls and the registration calls return. Unless a
+  step says otherwise the REVERSE_ON registration returns null. "Covered" is as AIR-041 defines it:
+  from process start until the first focus gain, from a focus loss until the next focus gain, from a
+  REVERSE_ON until the next focus gain, from a registration that returns an intent until the next
+  focus gain, and for the whole run if that registration throws (OD-120, OD-124, OD-128, OD-129). A
+  notice attempt that falls due while the receiver is covered is "held": nothing is created, and the
+  attempt is made at the time the receiver stops counting as covered (AIR-041(d)) (OD-122).
 
   The "current" log file is the one being written; the "older" file is the one kept from the last
   rotation. A record's size counts every byte written, including its line terminator. Rotation
@@ -514,7 +516,7 @@ Feature: Regulation evidence, the log cap and logging failures
       | 2000 |
       | 6000 |
 
-  @offline @normal @AIR-019 @AIR-040 @AIR-041 @AT-41 @OD-117 @OD-120
+  @offline @normal @AIR-041 @AT-41 @OD-117 @OD-120
   Scenario: Losing focus removes both notices at once
     Given the parking check is on, on a supported build
     And ACC registration throws an exception at 0 ms
@@ -704,6 +706,33 @@ Feature: Regulation evidence, the log cap and logging failures
     Then no view was created, measured or added before 3000 ms
     And exactly one logging-failure notice add call was made, at exactly 3000 ms
     And it was removed at exactly 8000 ms
+    And exactly one record containing "reverse_on received" was written, at 0 ms
+    And no record containing "notice cover" was written before 3000 ms
+
+  @offline @normal @AIR-041 @AT-41 @OD-124 @OD-128
+  Scenario Outline: The REVERSE_ON registration returns before the window can first gain focus
+    Given the parking check is <flag>, on a supported build
+    And the lifecycle double runs onCreate, onStart and onResume at 0 ms and delivers the first focus gain as soon as onResume returns
+    When the receiver starts
+    Then the recorder shows the REVERSE_ON registration call returned before onResume returned
+    And the recorder shows it returned before the first onWindowFocusChanged(true) was delivered
+    And exactly one REVERSE_ON registration call was made
+
+    Examples:
+      | flag |
+      | on   |
+      | off  |
+
+  @offline @boundary @AIR-041 @AT-41 @OD-124 @OD-128
+  Scenario: A REVERSE_ON with no focus change after it keeps notices off until exit
+    Given the parking check is on, on a supported build
+    And REVERSE_ON is delivered at 500 ms
+    When a log write fails at 1000 ms
+    And the receiver runs for 60000 ms and then exits
+    Then no view was created, measured or added at any time
+    And no removal call was made, before or at exit
+    And exactly one record containing "notice cover", "covered=yes" and "cause=reverse" was written, at 500 ms
+    And no record containing "covered=no" was written
 
   @offline @failure @AIR-019 @AIR-041 @AT-41 @OD-129
   Scenario: A REVERSE_ON registration that throws keeps every notice off screen for the run
@@ -887,8 +916,8 @@ Feature: Regulation evidence, the log cap and logging failures
 
   @offline @normal @AIR-041 @AT-41 @OD-124 @OD-128
   Scenario: Covering is wired to REVERSE_ON through a runtime receiver only
-    When the receiver's sources and built manifest are scanned
+    When the receiver's sources and source AndroidManifest.xml are scanned
     Then the sources register a runtime receiver for com.hkmc.intent.action.REVERSE_ON and unregister it at exit
     And the manifest declares no receiver for REVERSE_ON
-    And the sources contain no REVERSE_OFF or isRearViewOn reference used for notice covering
+    And the sources contain no REVERSE_OFF or isRearViewOn reference
     And the sources read none of REVERSE_ON's extras
