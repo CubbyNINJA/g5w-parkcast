@@ -30,13 +30,18 @@ tasks.named('compileTestJava') {
 }
 
 def featuresDir = rootProject.file('specs/features')
+// The Cucumber feature files are listed in specs/java-features.txt (OD-177); pytest-bdd runs the rest.
+def javaFeatures = rootProject.file('specs/java-features.txt').readLines('UTF-8')
+        .collect { it.trim() }.findAll { it && !it.startsWith('#') }
+        .collect { new File(featuresDir, it) }.findAll { it.exists() }
+        .collect { it.absolutePath }.join(',')
 
 test {
     useJUnitPlatform()
     // Only S2's synthetic scenarios run here; @unit evidence checks come last (OD-135).
-    systemProperty 'cucumber.features', System.getProperty('cucumber.features', featuresDir.absolutePath)
+    systemProperty 'cucumber.features', System.getProperty('cucumber.features', javaFeatures)
     systemProperty 'cucumber.glue', 'parkcast.gate.steps'
-    systemProperty 'cucumber.filter.tags', System.getProperty('cucumber.filter.tags', '@S2 and @offline')
+    systemProperty 'cucumber.filter.tags', System.getProperty('cucumber.filter.tags', '@offline')
     systemProperty 'cucumber.plugin', 'summary'
     inputs.dir(featuresDir)
     testLogging {

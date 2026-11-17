@@ -1,0 +1,8 @@
+# Feature files that run under Cucumber-JVM (OD-133, OD-177). Everything else runs under pytest-bdd.
+# Read by tests/feature_sets.py and receiver/gate/build.gradle. One file name per line.
+09_parking_gate.feature
+10_parking_config.feature
+11_parking_logs.feature
+12_parking_unit.feature
+13_receiver_runtime.feature
+15_receiver_unit.feature
