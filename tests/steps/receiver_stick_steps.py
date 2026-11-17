@@ -8,11 +8,15 @@ against a fake unit root and a fake stick (`receiver_toolbox.Fakes`). Every fixt
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 
+import pytest
 from pytest_bdd import given, parsers, then, when
 
-from steps.receiver_toolbox import BLANK_CHECKLIST, LOG_DIR, MARKED, RUN_PARENT, TIMESTAMP, Fakes, sha
+from steps.receiver_toolbox import (BLANK_CHECKLIST, LOG_DIR, MARKED, RUN_PARENT, TIMESTAMP, Fakes, posix_path, sha,
+                                    sh_executable)
 
 RECEIVER_PACKAGE = "parkcast.receiver"
 ZIP_ID = "airplay.receiver"
@@ -62,6 +66,37 @@ def logs_and_identity_key(rworld):
     key = _fakes(rworld).root / "data" / "data" / RECEIVER_PACKAGE / "files" / KEY_NAME
     key.parent.mkdir(parents=True)
     key.write_bytes(KEY_BYTES)
+
+
+LINK_NAME = "linked.log"
+
+
+def _make_symlink(target, link):
+    """A symlink the host's sh sees as one: os.symlink, else Git sh's `ln -s` with native Windows links."""
+    try:
+        os.symlink(target, link)
+    except OSError:
+        env = dict(os.environ, MSYS="winsymlinks:sys")
+        subprocess.run([sh_executable(), "-c", 'ln -s "$1" "$2"', "sh", posix_path(target.parent) + "/"
+                        + target.name, posix_path(link.parent) + "/" + link.name], env=env, capture_output=True)
+    probe = subprocess.run([sh_executable(), "-c", '[ -L "$1" ]', "sh",
+                            posix_path(link.parent) + "/" + link.name], capture_output=True)
+    if probe.returncode != 0:
+        pytest.skip("this host cannot make a symlink the POSIX sh sees as one")
+
+
+@given("a fake unit tree with receiver log files and, in the log directory, a symlink to the identity key file "
+       "in the receiver's app-data directory")
+def logs_and_link_to_key(rworld):
+    logs_and_identity_key(rworld)
+    fakes = _fakes(rworld)
+    _make_symlink(fakes.root / "data" / "data" / RECEIVER_PACKAGE / "files" / KEY_NAME, fakes.log_dir / LINK_NAME)
+
+
+@given("a fake unit tree whose receiver log directory exists and holds no files")
+def empty_log_dir(rworld):
+    _fakes(rworld).log_dir.mkdir(parents=True)
+    rworld.stick_logs = {}
 
 
 @given('the fake "cp" fails after copying the first file')
@@ -260,6 +295,18 @@ def no_key_bytes(rworld):
     assert hits == [], hits
 
 
+@then("no file on the stick has the link's name")
+def no_link_name(rworld):
+    names = [p.name for p in _fakes(rworld).stick_files()]
+    assert LINK_NAME not in names, names
+
+
+@then("the script reports that there are no log files")
+def reports_no_logs(rworld):
+    lines = [ln for ln in _output(rworld).lower().splitlines() if "no log files" in ln]
+    assert lines, _output(rworld)
+
+
 # --- The evaluator on the placed blank files (the eval area owns airplay_s3/evaluator.py) -----------------
 
 
@@ -340,6 +387,12 @@ def install_tree_no_uid(rworld):
                                          f"default 3003\n"))
 
 
+@given("a fake unit tree on which the install succeeds and the receiver's package is listed twice in packages.list")
+def install_tree_uid_twice(rworld):
+    _install_tree(rworld, packages_list=_PACKAGES_LIST
+                  + f"{RECEIVER_PACKAGE} 10124 0 /data/data/{RECEIVER_PACKAGE} default 3003\n")
+
+
 @given('a fake unit tree on which the install succeeds and the fake "chown" exits non-zero')
 def install_tree_chown_fails(rworld):
     _install_tree(rworld, **{"chown.rc": "1\n"})
@@ -355,6 +408,11 @@ def install_tree_install_and_dir_succeed(rworld):
 def am_start_error(rworld):
     _fakes(rworld).set("am.start.out", f"Starting: Intent {{ cmp={RECEIVER_PACKAGE}/.Fixture }}\n"
                                        "Error: Activity class does not exist.\n")
+
+
+@given('the fake "am start" exits 1 with no error text')
+def am_start_exits_1(rworld):
+    _fakes(rworld).set("am.start.rc", "1\n")
 
 
 def _stage_zip(rworld):

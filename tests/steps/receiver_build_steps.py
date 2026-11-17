@@ -4,7 +4,7 @@
 zip archives served by a fake download function, a fixture copy of the UxPlay source tree with a known
 `raop_callbacks_s`, a fixture repository holding the patches, and a fake SDK root. Nothing is downloaded.
 The one exception is the signing scenario, which runs read-only `git ls-files` and `git check-ignore` on
-this repository.
+this repository; its failure twin runs them on a tmp scratch repository.
 
 @host scenarios read the real artifacts of a build on this PC (the APK, the native-prep log under
 `receiver/native/.cache/`, the patched UxPlay tree, `compile_commands.json`) and skip, naming the missing
@@ -300,6 +300,47 @@ def _no_protocol_library(rworld):
     assert so == [], so
 
 
+@given("a clean checkout with an untracked patch file in the receiver's patch directory")
+def _untracked_patch_fixture(rworld):
+    _native_fixture(rworld)
+    rel = f"{PATCH_DIR}/0003-untracked.patch"
+    _write(rworld.build_repo / rel,
+           _patch("lib/raop.c", UXPLAY_FILES["lib/raop.c"], UXPLAY_FILES["lib/raop.c"] + f"/* {DECOY} */\n"))
+    rworld.build_untracked_patch = rel  # deliberately not added to build_tracked
+
+
+@then("the untracked patch is never applied")
+def _untracked_never_applied(rworld):
+    log = (rworld.build_cache / "native-prep.log").read_text(encoding="utf-8")
+    assert f"patch applied: {rworld.build_untracked_patch}" not in log.splitlines(), log
+    changed = [p for p in _files(rworld.build_cache / "src") if DECOY in p.read_text(encoding="utf-8", errors="replace")]
+    assert changed == [], changed
+
+
+@given("a UxPlay fetch fixture whose HEAD is not the pinned commit")
+def _uxplay_wrong_head(rworld):
+    _native_fixture(rworld)
+    inner = rworld.build_fetch_uxplay
+
+    def fetch_uxplay(url, commit, dest):
+        inner(url, commit, dest)
+        return "1" * 40
+
+    rworld.build_fetch_uxplay = fetch_uxplay
+
+
+@given("a committed unguarded-callbacks list that leaves out a callback the source calls without a NULL check")
+def _callback_list_short(rworld):
+    _native_fixture(rworld)
+    _write(rworld.build_repo / "receiver" / "native" / "unguarded-callbacks.txt",
+           "# raop_callbacks_t members UxPlay calls without a NULL check\n" + "".join(f"{n}\n" for n in UNGUARDED[:1]))
+
+
+@then("the build fails naming the unguarded-callbacks list")
+def _fails_naming_callback_list(rworld):
+    assert "unguarded-callbacks.txt" in _error(rworld), _error(rworld)
+
+
 # ---------------------------------------------------------------------------------------------------------
 # @offline: dependency archives and pins (AIR-044)
 # ---------------------------------------------------------------------------------------------------------
@@ -334,6 +375,26 @@ def _no_output_left(rworld):
     left += [p for p in (rworld.build_cache / "src").glob("openssl*")] if (rworld.build_cache / "src").exists() else []
     assert left == [], left
     assert not (rworld.build_cache / "prep.stamp").exists()
+
+
+@given("a fixture archive of the second dependency whose SHA-256 differs from its pin")
+def _wrong_sha_second(rworld):
+    _native_fixture(rworld, lock_override={"libplist": "0" * 64})
+
+
+@then("the build fails naming the libplist SHA-256 mismatch")
+def _fails_sha_libplist(rworld):
+    msg = _error(rworld)
+    assert "SHA-256 mismatch" in msg and "libplist" in msg, msg
+
+
+@then("no dependency archive is extracted")
+def _no_dep_extracted(rworld):
+    markers = [p for p in _files(rworld.build_base) if p.name.startswith("MARKER-")]
+    assert markers == [], markers
+    src = rworld.build_cache / "src"
+    left = sorted(p.name for p in src.iterdir()) if src.exists() else []
+    assert left == [], left
 
 
 @given(parsers.re(r"a pin fixture naming (?P<dependency>OpenSSL|libplist) (?P<version>\d+(?:\.\d+)*)"))
@@ -392,6 +453,27 @@ def _corrupt_sdk_archive(rworld):
     rworld.build_sdk_fetch = fetch
 
 
+@given("fixture SDK archives whose checksums all match")
+def _good_sdk_archives(rworld):
+    tools = _zip("android-14", {"source.properties": "Pkg.Revision=34.0.0\n", "MARKER-SDK-build-tools": "new\n"})
+    platform = _zip("android-34", {"source.properties": "Pkg.Revision=3\n", "MARKER-SDK-platform": "new\n"})
+    mirror = {FAKE_URL + "build-tools_r34-windows.zip": tools, FAKE_URL + "platform-34-ext7_r03.zip": platform}
+    lock = _write(rworld.tmp / "sdk.lock", "\n".join([
+        "[package build-tools/34.0.0]", f"url = {FAKE_URL}build-tools_r34-windows.zip",
+        "archive = build-tools_r34-windows.zip", f"sha256 = {_sha(tools)}", "",
+        "[package platforms/android-34]", f"url = {FAKE_URL}platform-34-ext7_r03.zip",
+        "archive = platform-34-ext7_r03.zip", f"sha256 = {_sha(platform)}", ""]))
+    rworld.build_sdk_lock = lock
+    rworld.build_sdk_lock_packages = ["build-tools/34.0.0", "platforms/android-34"]
+    rworld.build_sdk_cache = rworld.tmp / "sdk-cache"
+    rworld.build_sdk_log = rworld.tmp / "sdk-install.log"
+
+    def fetch(url, dest):
+        Path(dest).write_bytes(mirror[url])
+
+    rworld.build_sdk_fetch = fetch
+
+
 @when("the SDK install script runs")
 def _sdk_install_runs(rworld):
     from airplay_s3 import sdk_install
@@ -407,6 +489,14 @@ def _sdk_install_runs(rworld):
 def _install_stops_checksum(rworld):
     msg = _error(rworld)
     assert "checksum mismatch" in msg and "platforms/android-34" in msg, msg
+
+
+@then("the install log shows a checksum check for each package in the lock")
+def _sdk_log_each_checked(rworld):
+    from airplay_s3 import hostchecks
+    checked = hostchecks.sdk_log_checked(rworld.build_sdk_log.read_text(encoding="utf-8"))
+    missing = [p for p in rworld.build_sdk_lock_packages if p not in checked]
+    assert missing == [], f"no checksum line for: {missing}"
 
 
 @then("the corrupted archive is not extracted")
@@ -435,11 +525,31 @@ def _signing_paths(rworld):
     rworld.build_signing_paths = ["parkcast-release.jks", "local.properties"]
 
 
+@given("a scratch repository in which a copy of the signing key and the local signing file are added "
+       "and no ignore rule covers them")
+def _scratch_signing_repo(rworld):
+    # A tmp repository, never this one. A repo-local empty excludes file shuts out any global ignore rule, so
+    # nothing but this fixture decides what is ignored. `git add` is enough to make a path tracked.
+    repo = rworld.tmp / "scratch-repo"
+    repo.mkdir()
+    paths = ["parkcast-release.jks", "local.properties"]
+    _write(repo / paths[0], "synthetic keystore bytes, not a real key\n")
+    _write(repo / paths[1], "storeFile=parkcast-release.jks\n")
+    _write(repo / ".git-empty-excludes", "")
+    for args in (["init", "-q"], ["config", "core.excludesFile", str(repo / ".git-empty-excludes")],
+                 ["add", "--", *paths]):
+        proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+        assert proc.returncode == 0, f"git {args[0]} failed: {proc.stderr.strip()}"
+    rworld.build_signing_repo = repo
+    rworld.build_signing_paths = paths
+
+
 @when('"git ls-files" and "git check-ignore" are run on both paths')
 def _git_on_signing_paths(rworld):
     from airplay_s3 import hostchecks
-    rworld.build_tracked_paths = hostchecks.tracked(REPO, rworld.build_signing_paths)
-    rworld.build_ignored_paths = hostchecks.ignored(REPO, rworld.build_signing_paths)
+    repo = getattr(rworld, "build_signing_repo", REPO)
+    rworld.build_tracked_paths = hostchecks.tracked(repo, rworld.build_signing_paths)
+    rworld.build_ignored_paths = hostchecks.ignored(repo, rworld.build_signing_paths)
 
 
 @then("neither path is tracked")
@@ -450,6 +560,16 @@ def _neither_tracked(rworld):
 @then("both paths are ignored")
 def _both_ignored(rworld):
     assert sorted(rworld.build_ignored_paths) == sorted(rworld.build_signing_paths), rworld.build_ignored_paths
+
+
+@then("the check reports both paths as tracked")
+def _both_reported_tracked(rworld):
+    assert rworld.build_tracked_paths == rworld.build_signing_paths, rworld.build_tracked_paths
+
+
+@then("the check reports neither path as ignored")
+def _neither_reported_ignored(rworld):
+    assert rworld.build_ignored_paths == [], rworld.build_ignored_paths
 
 
 # ---------------------------------------------------------------------------------------------------------

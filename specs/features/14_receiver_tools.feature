@@ -67,6 +67,12 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Then every patch it applied is a file tracked in the repository
     And no patch is applied from outside the repository
 
+  @offline @failure @AIR-042 @AT-42 @OD-174
+  Scenario: A patch file that is not tracked in the repository is never applied
+    Given a clean checkout with an untracked patch file in the receiver's patch directory
+    When the native build runs
+    Then the untracked patch is never applied
+
   @host @normal @AIR-042 @AT-42 @OD-169
   Scenario: A clean build checks out UxPlay 05b0275 and applies the dns_sd and bind patches
     Given a clean build of the receiver on this PC
@@ -108,6 +114,12 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     When the native build runs
     Then the build fails naming the patch
     And no protocol library is produced
+
+  @offline @failure @AIR-042 @AT-42
+  Scenario: A UxPlay checkout at another commit produces no protocol library
+    Given a UxPlay fetch fixture whose HEAD is not the pinned commit
+    When the native build runs
+    Then no protocol library is produced
 
   @host @normal @AIR-043 @AT-43 @OD-143
   Scenario: The APK carries native libraries for armeabi-v7a only
@@ -159,6 +171,13 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And the archive is never extracted
     And no output of that dependency is left
 
+  @offline @failure @AIR-044 @AT-44
+  Scenario: A wrong SHA-256 on the second dependency fails before any extraction
+    Given a fixture archive of the second dependency whose SHA-256 differs from its pin
+    When the native build runs
+    Then the build fails naming the libplist SHA-256 mismatch
+    And no dependency archive is extracted
+
   @offline @failure @AIR-044 @AT-44 @OD-168
   Scenario Outline: A pin outside the allowed release line fails the build
     Given a pin fixture naming <dependency> <version>
@@ -177,6 +196,13 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Given the Android SDK install log from this PC
     When the log is read
     Then it shows a checksum check for each package installed under "C:\Android"
+
+  @offline @normal @AIR-045 @AT-45 @OD-142
+  Scenario: The SDK install log shows a checksum check for each package it installs
+    Given a fake SDK root with packages already installed
+    And fixture SDK archives whose checksums all match
+    When the SDK install script runs
+    Then the install log shows a checksum check for each package in the lock
 
   @offline @failure @AIR-045 @AT-45 @OD-142
   Scenario: A corrupted SDK archive stops the install and changes nothing installed
@@ -206,6 +232,13 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     When "git ls-files" and "git check-ignore" are run on both paths
     Then neither path is tracked
     And both paths are ignored
+
+  @offline @failure @AIR-047 @AT-47 @OD-188
+  Scenario: The repository check catches a signing file that is tracked and not ignored
+    Given a scratch repository in which a copy of the signing key and the local signing file are added and no ignore rule covers them
+    When "git ls-files" and "git check-ignore" are run on both paths
+    Then the check reports both paths as tracked
+    And the check reports neither path as ignored
 
   @host @failure @AIR-047 @AT-47 @OD-145
   Scenario Outline: A missing signing input fails the build and names which one
@@ -237,6 +270,12 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     When the static check lists every raop_callbacks_t member the source calls without a preceding NULL check
     Then the build log has the line "unguarded callbacks: " followed by that list, comma-separated
     And the host callback table sets every member on that list to a non-NULL function
+
+  @offline @failure @AIR-055 @AT-55 @OD-189
+  Scenario: A committed callback list that differs from the source fails the build
+    Given a committed unguarded-callbacks list that leaves out a callback the source calls without a NULL check
+    When the native build runs
+    Then the build fails naming the unguarded-callbacks list
 
   @host @normal @AIR-063 @AT-63
   Scenario: The built APK carries no receiver.conf
@@ -329,6 +368,20 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And no file on the stick has the key file's name
     And no file on the stick contains the key file's bytes
 
+  @offline @normal @AIR-074 @AIR-083 @AT-74 @OD-192
+  Scenario: A symlink in the log directory is never followed
+    Given a fake unit tree with receiver log files and, in the log directory, a symlink to the identity key file in the receiver's app-data directory
+    When the log-copy stick script runs
+    Then no file on the stick has the link's name
+    And no file on the stick contains the key file's bytes
+
+  @offline @failure @AIR-074 @AT-74 @OD-192
+  Scenario: An empty log directory fails the log copy
+    Given a fake unit tree whose receiver log directory exists and holds no files
+    When the log-copy stick script runs
+    Then the script reports that there are no log files
+    And the script exits non-zero
+
   @offline @normal @AIR-078 @AIR-062 @AT-78
   Scenario: The install zip contains only NEMESIS.data and the APK
     Given the install zip built for the stick
@@ -389,6 +442,19 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | detailed-desc | 257    | refuses it naming detailed-desc |
 
   @offline @boundary @AIR-078 @AT-78
+  Scenario Outline: The name and type limits are checked at their edges
+    Given an install manifest fixture whose <field> is <length> bytes long
+    When the install zip check runs on it
+    Then the check <result>
+
+    Examples:
+      | field | length | result                  |
+      | name  | 127    | accepts it              |
+      | name  | 128    | refuses it naming name  |
+      | types | 79     | accepts it              |
+      | types | 80     | refuses it naming types |
+
+  @offline @boundary @AIR-078 @AT-78
   Scenario: Surrounding quotes do not count toward the short-desc limit
     Given an install manifest fixture whose short-desc is 64 characters long, written in surrounding quotes (66 characters with them)
     When the install zip check runs on it
@@ -427,6 +493,19 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | os     | 256    | include the line "os: longer than 255 bytes"     |
       | models | 255    | have no line starting "models: longer than"      |
       | models | 256    | include the line "models: longer than 255 bytes" |
+
+  @offline @failure @AIR-078 @AT-78
+  Scenario: A manifest that declares depends is refused
+    Given an install manifest fixture with the line "depends=example.dependency" in its [nemesis] section
+    When the install zip check runs on it
+    Then the check refuses it naming depends
+    And no install zip is produced
+
+  @offline @failure @AIR-078 @AIR-063 @AT-78
+  Scenario: A zip that ships config/receiver.conf is refused
+    Given an install zip fixture holding a valid "NEMESIS.data", the APK and a "config/receiver.conf" member
+    When the package check runs on that zip
+    Then the check's findings include the line "config/receiver.conf: must not be shipped"
 
   @offline @failure @AIR-078 @AT-78 @OD-185
   Scenario: The package check reports every failed rule, not only the first
@@ -474,7 +553,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | "nemesis pkg-list" has no line whose first field is "airplay.receiver"                        |
       | "pm list packages" has no line "package:" followed by the receiver's package                  |
 
-  @offline @failure @AIR-078 @AT-78
+  @offline @failure @AIR-078 @AT-78 @OD-192
   Scenario Outline: A failed directory step stops the script before the start
     Given a fake unit tree on which the install succeeds and <failure>
     And the install zip staged on the fake stick
@@ -485,14 +564,23 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And the output of every command it ran is kept on the stick
 
     Examples:
-      | failure                                   |
-      | the receiver's uid cannot be found        |
-      | the fake "chown" exits non-zero           |
+      | failure                                                           |
+      | the receiver's uid cannot be found                                |
+      | the receiver's package is listed twice in packages.list           |
+      | the fake "chown" exits non-zero                                   |
 
   @offline @failure @AIR-078 @AT-78 @OD-163
   Scenario: An am start that prints an error fails the script
     Given a fake unit tree on which the install and the directory step succeed
     And the fake "am start" prints "Error: Activity class does not exist." and exits 0
+    When the install stick script runs
+    Then the script exits non-zero
+    And the output of every command it ran is kept on the stick
+
+  @offline @failure @AIR-078 @AT-78
+  Scenario: An am start that exits non-zero fails the script
+    Given a fake unit tree on which the install and the directory step succeed
+    And the fake "am start" exits 1 with no error text
     When the install stick script runs
     Then the script exits non-zero
     And the output of every command it ran is kept on the stick
@@ -580,7 +668,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | all six keys "yes" plus the lines "secret text: yes" and "free text"                                                                     | Checklist: parkcast listed=yes; letterboxed=yes; sound on unit=yes; stayed behind other app=yes; nothing on cluster or hud=yes; carplay after exit=yes |
 
   @offline @failure @AIR-075 @AIR-028 @AT-75
-  Scenario Outline: A log without an S3 marker makes every session an evidence error
+  Scenario Outline: A log without an S3 marker or its final newline makes every session an evidence error
     Given a damaged stick log with two sessions that would be GO and <damage>
     When the evaluator judges the run
     Then every session's verdict is INCONCLUSIVE with the reason "evidence error"
@@ -591,6 +679,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | damage                 | limitation      |
       | no start marker        | no start marker |
       | no end marker          | truncated       |
+      | no final newline       | truncated       |
 
   @offline @normal @AIR-076 @AT-76 @OD-139
   Scenario: A session with an H.264 picture the owner saw is GO
@@ -641,6 +730,38 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Then the session's verdict is NO-GO
     And the verdict cites the line "decoder error"
     And the run's verdict is NO-GO
+
+  @offline @boundary @AIR-076 @AT-76 @OD-139 @OD-185
+  Scenario: A decoder error after the first rendered frame does not stop a GO
+    Given a receiver log excerpt with these lines:
+      """
+      session 1 connection accepted model=iPhone15,2
+      Mirroring initialized successfully
+      session 1 codec h264 1920x720
+      decoder OMX.TCC.avcdec configured
+      session 1 first frame rendered
+      decoder error
+      session 1 end reason=decoder error withheld=0
+      """
+    And the owner's note says "picture: yes"
+    When the evaluator judges the run
+    Then the session's verdict is GO
+    And the run's verdict is GO
+
+  @offline @boundary @AIR-076 @AT-76 @OD-139
+  Scenario: A rendered H.264 picture without the decoder configured line is not GO
+    Given a receiver log excerpt with these lines:
+      """
+      session 1 connection accepted model=iPhone15,2
+      Mirroring initialized successfully
+      session 1 codec h264 1920x720
+      session 1 first frame rendered
+      session 1 end reason=iphone disconnected withheld=0
+      """
+    And the owner's note says "picture: yes"
+    When the evaluator judges the run
+    Then the session's verdict is not GO
+    And the run's verdict is not GO
 
   @offline @normal @AIR-076 @AT-76 @OD-139 @OD-185
   Scenario: A session in which the iPhone sent HEVC is NO-GO
@@ -716,6 +837,27 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Then the session's verdict is INCONCLUSIVE with the reason "gate never permitted video"
     And the run's verdict is INCONCLUSIVE
 
+  @offline @normal @AIR-076 @AIR-010 @AT-76
+  Scenario: One GO session makes the run GO when another session is INCONCLUSIVE
+    Given a receiver log excerpt with these lines:
+      """
+      session 1 connection accepted model=iPhone15,2
+      Mirroring initialized successfully
+      session 1 codec h264 1920x720
+      decoder OMX.TCC.avcdec configured
+      session 1 first frame rendered
+      session 1 end reason=iphone disconnected withheld=0
+      session 2 connection accepted model=iPhone15,2
+      Mirroring initialized successfully
+      session 2 codec h264 1920x720
+      decoder OMX.TCC.avcdec configured
+      session 2 first frame withheld by gate
+      session 2 end reason=iphone disconnected withheld=1
+      """
+    And the owner's note says "picture: yes"
+    When the evaluator judges the run
+    Then the run's verdict is GO
+
   @offline @boundary @AIR-076 @AT-76 @OD-154 @OD-162
   Scenario: A session that would be GO with no owner's note is INCONCLUSIVE
     Given a session that would be GO
@@ -738,6 +880,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | "picture: no" with one trailing LF                                             | NO-GO                                           |
       | an empty file                                                                  | INCONCLUSIVE with the reason "owner note missing" |
       | the two lines "picture: yes" and "picture: no"                                 | INCONCLUSIVE with the reason "owner note missing" |
+      | the two lines "picture:" and "yes"                                             | INCONCLUSIVE with the reason "owner note missing" |
       | "picture: maybe"                                                               | INCONCLUSIVE with the reason "owner note missing" |
       | an unreadable file                                                             | INCONCLUSIVE with the reason "owner note missing" |
       | "picture: yes" in "NEMESIS-diag/airplay-receiver/", outside the "<timestamp>/" folder | INCONCLUSIVE with the reason "owner note missing" |
@@ -879,6 +1022,13 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     When the evaluator judges the run
     Then the record names the launch time at 0 s and the deadline at 600 s
     And the record names the actual endpoint at 600 s and the termination reason "timeout"
+
+  @offline @boundary @AIR-076 @AIR-011 @AT-76 @OD-162
+  Scenario: An end marker exactly at the deadline does not end observation earlier
+    Given a session that would be GO, with its first frame rendered at 120 s
+    And the end marker at 600 s
+    When the evaluator judges the run
+    Then the record names the actual endpoint at 600 s and the termination reason "timeout"
 
   @offline @boundary @AIR-076 @AT-76 @OD-162
   Scenario Outline: Only a first frame before the deadline counts

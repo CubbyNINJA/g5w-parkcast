@@ -366,3 +366,36 @@ def zip_one_line_per_rule(rworld):
         assert len([f for f in fields if f in line]) <= 1, f"one line names two rules: {line!r}"
     for field in fields:
         assert any(f.startswith(f"{field}: ") for f in findings), f"no line for {field}: {findings}"
+
+
+@given(parsers.re(r"an install manifest fixture whose (?P<field>name|types) is (?P<length>\d+) bytes long"))
+def zip_fixture_byte_length(rworld, field, length):
+    lines = _fixture_lines()
+    _set(lines, field, "B" * int(length))
+    _store_fixture(rworld, lines)
+
+
+@given(parsers.parse('an install manifest fixture with the line "{line}" in its [nemesis] section'))
+def zip_fixture_extra_line(rworld, line):
+    lines = _fixture_lines()
+    key, value = line.split("=", 1)
+    lines["nemesis"].append((key, value))
+    _store_fixture(rworld, lines)
+
+
+@given('an install zip fixture holding a valid "NEMESIS.data", the APK and a "config/receiver.conf" member')
+def zip_fixture_with_config(rworld):
+    out = rworld.tmp / "input" / "airplay.receiver.zip"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("NEMESIS.data", _render(_fixture_lines()).encode("utf-8"))
+        z.writestr("parkcast-receiver.apk", PLACEHOLDER_APK)
+        z.writestr("config/receiver.conf", b"video.require_park=true\n")
+    rworld.zip_path = out
+
+
+@when("the package check runs on that zip")
+def zip_check_runs_on_zip(rworld):
+    from airplay_s3 import zipcheck
+
+    rworld.zip_findings = zipcheck.check_zip(rworld.zip_path)

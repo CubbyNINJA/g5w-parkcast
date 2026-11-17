@@ -109,7 +109,8 @@ def _stop(rworld):
 
 def _render(rworld) -> bytes:
     lines = [r["raw"] if r["raw"] is not None else f"{r['ms']} {r['text']}" for r in rworld.eval_recs]
-    return ("\n".join(lines) + "\n").encode("utf-8")
+    end = "" if getattr(rworld, "eval_no_final_lf", False) else "\n"
+    return ("\n".join(lines) + end).encode("utf-8")
 
 
 def _place(run_dir: Path, name: str, data, where: str) -> None:
@@ -456,9 +457,12 @@ def eval_owner_ios(rworld, ios):
 # --- AIR-075(b), AIR-076: verdicts --------------------------------------------------------------------------
 
 
-@given(parsers.re("a damaged stick log with two sessions that would be GO and (?P<damage>no start marker|no end marker)"))
+@given(parsers.re("a damaged stick log with two sessions that would be GO and (?P<damage>no start marker|no end marker|no final newline)"))
 def eval_damaged_log(rworld, world, damage):
     _two_go_runs(rworld, world)
+    if damage == "no final newline":
+        rworld.eval_no_final_lf = True
+        return
     prefix = "parkcast start" if damage == "no start marker" else "parkcast stop"
     rworld.eval_recs = [r for r in rworld.eval_recs if not r["text"].startswith(prefix)]
 
@@ -481,6 +485,13 @@ def eval_session_verdict(rworld, verdict):
     j = _j(rworld)
     assert len(j.sessions) == 1, [s.verdict for s in j.sessions]
     assert j.sessions[0].verdict == verdict, (j.sessions[0].verdict, j.sessions[0].reason)
+
+
+@then("the session's verdict is not GO")
+def eval_session_verdict_not_go(rworld):
+    j = _j(rworld)
+    assert len(j.sessions) == 1, [s.verdict for s in j.sessions]
+    assert j.sessions[0].verdict != "GO", (j.sessions[0].verdict, j.sessions[0].reason)
 
 
 def _line_numbers(rworld, pred) -> list[int]:
@@ -534,6 +545,7 @@ NOTE_FIXTURES = {
     '"picture: no" with one trailing LF': (b"picture: no\n", "run"),
     "an empty file": (b"", "run"),
     'the two lines "picture: yes" and "picture: no"': (b"picture: yes\npicture: no\n", "run"),
+    'the two lines "picture:" and "yes"': (b"picture:\nyes\n", "run"),
     '"picture: maybe"': (b"picture: maybe", "run"),
     "an unreadable file": (None, "unreadable"),
     '"picture: yes" in "NEMESIS-diag/airplay-receiver/", outside the "<timestamp>/" folder': (NOTE_YES, "outside"),
