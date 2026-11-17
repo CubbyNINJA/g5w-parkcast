@@ -48,11 +48,19 @@ public final class FakeNsd implements NsdWake {
                         trace.add("nsd", "startFailed", String.valueOf(code));
                         l.startFailed(code);
                     });
-                } else {
-                    scheduler.at(at, () -> {
+                } else if (!startedNever) {
+                    scheduler.at(startedAt >= 0 ? startedAt : at, () -> {
                         if (scheduler.startIndex != start) return;
                         trace.add("nsd", "started", "");
                         l.started();
+                    });
+                }
+                if (foundName != null) {
+                    scheduler.at(foundAt, () -> {
+                        if (scheduler.startIndex == start) trace.add("nsd", "found", foundName);
+                    });
+                    scheduler.at(lostAt, () -> {
+                        if (scheduler.startIndex == start) trace.add("nsd", "lost", foundName);
                     });
                 }
             }
@@ -63,4 +71,15 @@ public final class FakeNsd implements NsdWake {
             }
         };
     }
+
+    /** The absolute time {@code onDiscoveryStarted} is delivered; -1 for 10 ms after discover. */
+    public long startedAt = -1;
+    /** {@code onDiscoveryStarted} never arrives. */
+    public boolean startedNever;
+    /**
+     * A service the manager reports found at {@link #foundAt} and lost at {@link #lostAt}. The adapter drops
+     * discovery results before the listener (NsdWake), so they only reach the trace.
+     */
+    public String foundName;
+    public long foundAt, lostAt;
 }
