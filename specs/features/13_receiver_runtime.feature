@@ -973,8 +973,8 @@ Feature: The AirPlay receiver's runtime, with doubles
 
   @offline @normal @AIR-080 @AT-80
   Scenario: After focus is lost the receiver stays behind and shows no notice
-    Given the interface double reports wlan0 down
-    And the receiver's window loses focus at 0 ms, after the default focus gain, and never regains it
+    Given the receiver's window loses focus at 5 ms, after the default focus gain, and never regains it
+    And onStartDiscoveryFailed is delivered with error code 0 at 10 ms
     When the receiver runs for 20000 ms
     Then no notice add call was made
     And no moveTaskToFront, startActivity or requestFocus call was recorded
