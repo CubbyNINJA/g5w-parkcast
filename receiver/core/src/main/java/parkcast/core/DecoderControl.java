@@ -31,7 +31,7 @@ final class DecoderControl implements NativeEvents {
     @Override
     public void sessionStarted(int generation) {
         if (stopped) return;
-        // TODO(phase B: session records) log the session start with its generation (AIR-071).
+        if (sessions != null) sessions.started();
     }
 
     @Override
@@ -58,7 +58,7 @@ final class DecoderControl implements NativeEvents {
     @Override
     public void sessionEnded(int generation) {
         if (stopped) return;
-        // TODO(phase B: session records) log the session end and the withheld count.
+        if (sessions != null) sessions.end("iphone disconnected");
     }
 
     @Override
@@ -70,11 +70,12 @@ final class DecoderControl implements NativeEvents {
     @Override
     public void log(int generation, String record) {
         if (stopped) return;
-        // TODO(phase B: native records) filter against the allowlist and withhold key material (AIR-073, AIR-083).
+        if (sessions != null) sessions.nativeRecord(record);
     }
 
     /** Exit: drop every later event. */
     void stop() {
+        if (!stopped && sessions != null) sessions.end("stop");
         stopped = true;
     }
 
@@ -85,5 +86,12 @@ final class DecoderControl implements NativeEvents {
         codec = null;
         c.release();
         return true;
+    }
+
+    /** The session records and native-record filter (AIR-071, AIR-073); set once, before the start runs. */
+    private SessionLog sessions;
+
+    void useSessionLog(SessionLog s) {
+        sessions = s;
     }
 }

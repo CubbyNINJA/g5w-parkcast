@@ -79,6 +79,8 @@ public final class FakeNativeLibrary implements NativeLibrary {
         }
         trace.add("stdio", "dup2", "fd 1,2 -> /dev/null");
         trace.add("native", "raop_init", "");
+        trace.add("native", "raop_set_log_callback", "");
+        trace.add("native", "raop_set_log_level", plan.logLevel);
         trace.add("native", "raop_init2", "keyfile=" + plan.keyfile);
         try {
             if (!fs.files.containsKey(plan.keyfile)) {
@@ -134,5 +136,19 @@ public final class FakeNativeLibrary implements NativeLibrary {
     @Override
     public Status status() {
         return new Status(accepting, generation);
+    }
+
+    /** One native log record from UxPlay's callback, for the open session; dropped before ACCEPT. */
+    public void deliverLog(String record) {
+        if (events == null) return;
+        trace.add("native", "log", "gen=" + generation);
+        events.log(generation, record);
+    }
+
+    /** "The iPhone ended the connection": the open session ends. */
+    public void disconnect() {
+        if (events == null || generation == 0) return;
+        trace.add("native", "session end", "gen=" + generation);
+        events.sessionEnded(generation);
     }
 }

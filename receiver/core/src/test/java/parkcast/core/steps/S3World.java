@@ -61,6 +61,7 @@ public final class S3World {
         started = true;
         final ReceiverRuntime r = build();
         runtime = r;
+        if (beforeCreate != null) beforeCreate.accept(r);
         final boolean inLifecycle = focusAt == 0;
         scheduler.script(0, VirtualScheduler.FIRST, () -> {
             r.onCreate();
@@ -133,4 +134,7 @@ public final class S3World {
         seededMode = FakeNativeLibrary.KEY_MODE;
         fs.seed(KEY_PATH, bytes, seededMode);
     }
+
+    /** Runs on the new runtime before onCreate, for steps that act before the filter is ready. */
+    public java.util.function.Consumer<ReceiverRuntime> beforeCreate;
 }

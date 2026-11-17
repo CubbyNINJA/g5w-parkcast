@@ -156,4 +156,24 @@ public final class CommonS3Steps {
         for (int i = from; i < b.size(); i++) if (b.get(i).startsWith(s)) return i;
         return -1;
     }
+
+    @Given("a session starts at {int} ms")
+    public void sessionStartsAt(int t) {
+        if (w.started) {
+            w.scheduler.script(t, parkcast.gate.harness.VirtualScheduler.AFTER, new Runnable() {
+                @Override
+                public void run() {
+                    w.nativeLib.session("h264", 1920, 720);
+                }
+            });
+        } else {
+            w.sessionsAt.add((long) t);
+        }
+    }
+
+    @When("the receiver runs for {int} ms and then exit\\() is called")
+    public void runsForThenExit(int ms) {
+        w.exitAt(ms);
+        w.runFor(ms);
+    }
 }

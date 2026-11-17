@@ -5,6 +5,7 @@ import parkcast.core.port.CodecFactory;
 import parkcast.core.port.CoverView;
 import parkcast.core.port.CrashHook;
 import parkcast.core.port.InterfaceQuery;
+import parkcast.core.port.NativeEvents;
 import parkcast.core.port.NativeLibrary;
 import parkcast.core.port.NsdWake;
 import parkcast.gate.Receiver;
@@ -66,6 +67,9 @@ public final class ReceiverRuntime {
         };
         // TODO(phase B: black cover) drive the cover view from the gate's blocking state.
         DecoderControl decoder = new DecoderControl(codecs, nativeLib, log);
+        this.decoder = decoder;
+        this.sessions = new SessionLog(log, new NativeLogFilter(files, StartSequence.KEY_FILE));
+        decoder.useSessionLog(sessions);
         Advertiser advertiser = new Advertiser(scheduler, nsd, nativeLib, log);
         this.start = new StartSequence(new HotspotCheck(ifaces), files, nativeLib, advertiser, decoder, log);
         this.stop = new StopSequence(gate, start, advertiser, decoder, nativeLib, log);
@@ -86,6 +90,7 @@ public final class ReceiverRuntime {
             }
         });
         gate.onCreate();
+        sessions.filterReady();
         try {
             start.run();
         } catch (RuntimeException e) {
@@ -128,5 +133,17 @@ public final class ReceiverRuntime {
             return UNKNOWN_PRODUCT;
         }
         return p == null ? UNKNOWN_PRODUCT : p;
+    }
+
+    private final DecoderControl decoder;
+    private final SessionLog sessions;
+
+    /** The library's event sink, as the native side calls it. */
+    NativeEvents events() {
+        return decoder;
+    }
+
+    SessionLog sessionLog() {
+        return sessions;
     }
 }
