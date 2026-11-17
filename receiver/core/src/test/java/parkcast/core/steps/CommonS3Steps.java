@@ -54,6 +54,7 @@ public final class CommonS3Steps {
 
     @Then("the log has {string}")
     public void logHas(String s) {
+        if (!w.started) w.settle();
         assertTrue(record(s, null) != null, "no record starting \"" + s + "\" in " + w.bodies());
     }
 

@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import parkcast.core.doubles.FakeNativeLibrary;
 import parkcast.core.doubles.Trace;
+import parkcast.gate.harness.VirtualScheduler;
 
 /** Steps for advertising (AIR-050): the NsdManager wake, the dns_sd connect window and the registrations. */
 public final class AdvertiseSteps {
@@ -71,6 +72,62 @@ public final class AdvertiseSteps {
     @Given("\\/dev\\/socket\\/mdnsd is missing for the whole run")
     public void missingForRun() {
         w.nativeLib.connectErrno = "ENOENT";
+    }
+
+    @Given("getSystemService\\(Context.NSD_SERVICE) returns null")
+    public void nsdNull() {
+        w.nsd.returnsNull = true;
+    }
+
+    @Given("getSystemService\\(Context.NSD_SERVICE) throws SecurityException")
+    public void nsdThrows() {
+        w.nsd.throwsSecurity = true;
+    }
+
+    @Given("onStartDiscoveryFailed is delivered with error code {int}")
+    public void discoveryFails(int code) {
+        w.nsd.failCode = code;
+    }
+
+    @Given("onDiscoveryStarted never arrives")
+    public void startedNever() {
+        w.nsd.startedNever = true;
+    }
+
+    @Given("\\/dev\\/socket\\/mdnsd is missing for the whole connect window")
+    public void missingForWindow() {
+        w.nativeLib.connectErrno = "ENOENT";
+    }
+
+    @Given("\\/dev\\/socket\\/mdnsd refuses with {word} for the whole connect window")
+    public void refusesForWindow(String errno) {
+        w.nativeLib.connectErrno = errno;
+    }
+
+    /** The fake reports the failure as its errno; any errno outside the four logged ones is "unreachable". */
+    @Given("every dns_sd connect throws {word} for the whole connect window")
+    public void connectThrows(String errno) {
+        w.nativeLib.connectErrno = errno;
+    }
+
+    @Given("the {word} TXT record cannot be built")
+    public void txtFails(String type) {
+        w.nativeLib.txtFails.add(type);
+    }
+
+    @Given("the {word} registration returns dns_sd error code {int}")
+    public void registerError(String type, int code) {
+        w.nativeLib.registerError.put(type, code);
+    }
+
+    @Given("the {word} registration gets a name-conflict reply with dns_sd error code {int}")
+    public void nameConflict(String type, int code) {
+        w.nativeLib.conflict.put(type, code);
+    }
+
+    @Given("the fake dns_sd closes its connection at {int} ms")
+    public void closesAt(int t) {
+        w.scheduler.script(t, VirtualScheduler.AFTER, w.nativeLib::closeConnection);
     }
 
     // ---- Thens --------------------------------------------------------------------------------------------
@@ -208,6 +265,69 @@ public final class AdvertiseSteps {
         for (String b : w.bodies()) assertFalse(b.startsWith(s), "record \"" + b + "\"");
     }
 
+    @Then("no registration was made")
+    public void noRegistration() {
+        assertTrue(w.trace.current("dnssd", "register").isEmpty(), "registrations: " + w.trace.current("dnssd", "register"));
+    }
+
+    @Then("no registration is left in place")
+    public void noneLeft() {
+        for (Trace.Entry r : w.trace.current("dnssd", "register")) {
+            if (r.details.contains(" error=")) continue;
+            String type = r.details.substring(0, r.details.indexOf(' '));
+            assertTrue(withdrawnAfter(type, r.seq) != null, type + " registered and never withdrawn:\n" + w.trace);
+        }
+    }
+
+    @Then("the {word} registration was withdrawn")
+    public void withdrawn(String type) {
+        Trace.Entry r = null;
+        for (Trace.Entry e : w.trace.current("dnssd", "register"))
+            if (e.details.startsWith(type + " ") && !e.details.contains(" error=")) r = e;
+        assertTrue(r != null, "no " + type + " registration:\n" + w.trace);
+        assertTrue(withdrawnAfter(type, r.seq) != null, type + " not withdrawn:\n" + w.trace);
+    }
+
+    @Then("discovery was stopped with stopServiceDiscovery if discoverServices had returned")
+    public void discoveryStoppedIfReturned() {
+        int discovers = w.trace.current("nsd", "discover").size();
+        int stops = w.trace.current("nsd", "stop").size();
+        assertEquals(discovers == 0 ? 0 : 1, stops, "stopServiceDiscovery calls after " + discovers + " discoverServices calls");
+    }
+
+    @Then("no accept call was made, and no registration, discoverServices call or dns_sd connect was made after the log record {string}")
+    public void nothingAfterFailure(String s) {
+        Timeline tl = new Timeline(w);
+        assertTrue(tl.of("native", "accept").isEmpty(), "accept calls" + tl);
+        Timeline.Item f = record(tl, s);
+        for (Timeline.Item i : tl.items) {
+            if (i.index <= f.index) continue;
+            assertFalse(i.is("dnssd", "register") || i.is("nsd", "discover") || i.is("dnssd", "connect"),
+                    i + " after \"" + s + "\"" + tl);
+        }
+    }
+
+    @Then("no dns_sd connect attempt or registration was made after {int} ms")
+    public void nothingAfter(int t) {
+        for (Trace.Entry e : w.trace.current("dnssd", null))
+            assertFalse(e.t > t && (e.name.equals("connect") || e.name.equals("register")), "after " + t + " ms: " + e);
+    }
+
+    @Then("the {word} and {word} registrations were both withdrawn")
+    public void bothWithdrawn(String a, String b) {
+        withdrawn(a);
+        withdrawn(b);
+    }
+
+    @Then("stopServiceDiscovery was called after both withdrawals")
+    public void stopAfterWithdrawals() {
+        List<Trace.Entry> stops = w.trace.current("nsd", "stop");
+        assertEquals(1, stops.size(), "stopServiceDiscovery calls");
+        List<Trace.Entry> wd = w.trace.current("dnssd", "withdraw");
+        assertEquals(2, wd.size(), "withdrawals");
+        for (Trace.Entry e : wd) assertTrue(e.seq < stops.get(0).seq, e + " not before " + stops.get(0));
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------------
 
     /** The connect window opens when onDiscoveryStarted is delivered. */
@@ -228,6 +348,12 @@ public final class AdvertiseSteps {
         List<Long> out = new ArrayList<>();
         for (String p : list.replace(" and ", ", ").split(", ")) out.add(Long.parseLong(p.trim()));
         return out;
+    }
+
+    private Trace.Entry withdrawnAfter(String type, int seq) {
+        for (Trace.Entry e : w.trace.current("dnssd", "withdraw"))
+            if (e.seq > seq && e.details.equals(type)) return e;
+        return null;
     }
 
     private void registrationNamed(String type, String name) {
