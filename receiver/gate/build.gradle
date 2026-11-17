@@ -30,10 +30,15 @@ tasks.named('compileTestJava') {
 }
 
 def featuresDir = rootProject.file('specs/features')
-// The Cucumber feature files are listed in specs/java-features.txt (OD-177); pytest-bdd runs the rest.
+// The Cucumber feature files are listed in specs/java-features.txt (OD-177); pytest-bdd runs the rest. This
+// runner takes only the lines marked "gate" (OD-189), so the receiver's files 13 and 15 never run here.
 def javaFeatures = rootProject.file('specs/java-features.txt').readLines('UTF-8')
         .collect { it.trim() }.findAll { it && !it.startsWith('#') }
-        .collect { new File(featuresDir, it) }.findAll { it.exists() }
+        .collect { it.split(/\s+/) }
+        .each { if (it.length != 2 || !(it[0] in ['gate', 'core'])) throw new GradleException("specs/java-features.txt: bad line '${it.join(' ')}'") }
+        .findAll { it[0] == 'gate' }
+        .collect { new File(featuresDir, it[1]) }
+        .each { if (!it.exists()) throw new GradleException("specs/java-features.txt names a missing file: ${it.name}") }
         .collect { it.absolutePath }.join(',')
 
 test {

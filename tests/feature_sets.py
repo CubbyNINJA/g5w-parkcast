@@ -8,14 +8,29 @@ FEATURES = ROOT / "specs" / "features"
 JAVA_LIST = ROOT / "specs" / "java-features.txt"
 
 
-def java_feature_names():
-    """The feature file names listed in specs/java-features.txt (comments and blank lines ignored)."""
-    names = set()
-    for line in JAVA_LIST.read_text(encoding="utf-8").splitlines():
+MODULES = ("gate", "core")
+
+
+def java_feature_entries():
+    """(module, file name) pairs from specs/java-features.txt (comments and blank lines ignored).
+
+    Each line is "<module> <file name>" (OD-189). An unknown module or a malformed line raises ValueError,
+    so a typo can't silently move a feature file to the wrong runner."""
+    entries = []
+    for number, line in enumerate(JAVA_LIST.read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
-        if line and not line.startswith("#"):
-            names.add(line)
-    return names
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) != 2 or parts[0] not in MODULES:
+            raise ValueError(f"{JAVA_LIST.name}:{number}: expected '<gate|core> <file>', got {line!r}")
+        entries.append((parts[0], parts[1]))
+    return entries
+
+
+def java_feature_names():
+    """The feature file names listed in specs/java-features.txt, whichever module runs them."""
+    return {name for _, name in java_feature_entries()}
 
 
 def python_features():
