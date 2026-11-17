@@ -1,0 +1,17 @@
+# raop_callbacks_t members UxPlay 05b0275 (patched) calls without a NULL check (AIR-055(g), OD-191).
+# Native prep fails if its scan of the patched source differs from this list; file 13 reads it offline.
+audio_process
+video_process
+video_pause
+video_resume
+conn_feedback
+conn_reset
+video_reset
+video_set_codec_and_size
+audio_set_client_volume
+on_video_play
+on_video_scrub
+on_video_rate
+on_video_stop
+on_video_acquire_playback_info
+on_video_playlist_remove

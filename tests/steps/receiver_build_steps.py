@@ -670,8 +670,15 @@ def _patched_sources(rworld):
 @when('every "bind" call in them is read')
 def _bind_calls(rworld):
     from airplay_s3 import hostchecks
-    rworld.build_binds = hostchecks.bind_calls(rworld.build_tree)
-    assert rworld.build_binds, "no bind call found in the patched sources"
+    # Only the files the build compiles count: UxPlay's own mDNS responder (lib/mdnsd/) is in the tree but
+    # never built, because the unit's mdnsd does that job (AIR-042(b), OD-164).
+    compiled = hostchecks.cmake_sources(REPO)
+    if compiled is None:
+        pytest.skip("no compile_commands.json under receiver/app/.cxx; build the receiver on this PC first")
+    compiled = ["/" + s.replace("\\", "/") for s in compiled]
+    rworld.build_binds = [b for b in hostchecks.bind_calls(rworld.build_tree)
+                          if any(s.endswith("/" + b.file) for s in compiled)]
+    assert rworld.build_binds, "no bind call found in the compiled patched sources"
 
 
 @then(parsers.re(r'no call passes "(?P<wildcard>INADDR_ANY|in6addr_any)"'))

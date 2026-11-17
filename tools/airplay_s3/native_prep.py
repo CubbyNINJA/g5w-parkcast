@@ -54,6 +54,7 @@ import hashlib
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -242,9 +243,15 @@ def _write_members(members, dest: Path):
         target.write_bytes(read())
 
 
+def _clear_readonly(func, path, _exc):
+    # Git marks its object files read-only, and Windows refuses to delete a read-only file.
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
 def _rmtree(path: Path):
     if path.exists():
-        shutil.rmtree(path)
+        shutil.rmtree(path, onerror=_clear_readonly)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -395,8 +402,9 @@ def _log(log, line):
 
 def prepare(lock_path, cache_dir, repo_root, *, fetch=None, fetch_uxplay=None, tracked=None, log=None,
             source=None) -> Result:
-    cache = Path(cache_dir)
-    repo_root = Path(repo_root)
+    # Absolute paths: patches are applied with the UxPlay tree as git's working directory.
+    cache = Path(cache_dir).resolve()
+    repo_root = Path(repo_root).resolve()
     lines = log if log is not None else []
     cache.mkdir(parents=True, exist_ok=True)
     stamp = cache / "prep.stamp"

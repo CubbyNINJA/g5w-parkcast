@@ -1,0 +1,65 @@
+diff --git a/lib/netutils.h b/lib/netutils.h
+--- a/lib/netutils.h
++++ b/lib/netutils.h
+@@ -17,6 +17,9 @@
+ 
+ int netutils_init();
+ void netutils_cleanup();
++/* ParkCast (AIR-042(d)(ii), AIR-049): every socket binds only to this IPv4 address, never a wildcard.
++ * Until it is set, and for every IPv6 socket, netutils_init_socket fails. Returns 0, or -1 for a bad address. */
++int netutils_set_bind_address(const char *ipv4);
+ int netutils_init_socket(unsigned short *port, int use_ipv6, int use_udp);
+ unsigned char *netutils_get_address(void *sockaddr, int *length, unsigned int *zone_id, unsigned short *port);
+ int netutils_parse_address(int family, const char *src, void *dst, int dstlen);
+diff --git a/lib/netutils.c b/lib/netutils.c
+--- a/lib/netutils.c
++++ b/lib/netutils.c
+@@ -110,9 +110,30 @@ netutils_get_address(void *sockaddr, int *length, unsigned int *zone_id, unsigne
+     return NULL;
+ }
+ 
++/* ParkCast: the one address every socket binds to (AIR-042(d)(ii)); 0 means unset, and binding fails. */
++static struct in_addr parkcast_bind_addr;
++static int parkcast_bind_set = 0;
++
++int
++netutils_set_bind_address(const char *ipv4)
++{
++    struct in_addr a;
++    if (!ipv4 || inet_pton(AF_INET, ipv4, &a) != 1 || a.s_addr == 0) {
++        parkcast_bind_set = 0;
++        return -1;
++    }
++    parkcast_bind_addr = a;
++    parkcast_bind_set = 1;
++    return 0;
++}
++
+ int
+ netutils_init_socket(unsigned short *port, int use_ipv6, int use_udp)
+ {
++    /* ParkCast: no IPv6 socket, and no IPv4 socket before the bind address is set (AIR-049). */
++    if (use_ipv6 || !parkcast_bind_set) {
++        return -1;
++    }
+     int family = use_ipv6 ? AF_INET6 : AF_INET;
+     int type = use_udp ? SOCK_DGRAM : SOCK_STREAM;
+     int proto = use_udp ? IPPROTO_UDP : IPPROTO_TCP;
+@@ -154,7 +175,7 @@ netutils_init_socket(unsigned short *port, int use_ipv6, int use_udp)
+ 
+         /* Initialize sockaddr for bind */
+         sin6ptr->sin6_family = family;
+-        sin6ptr->sin6_addr = in6addr_any;
++        return -1; /* ParkCast: unreachable, IPv6 is refused above; never a wildcard address */
+         sin6ptr->sin6_port = htons(*port);
+ 
+ #ifndef _WIN32
+@@ -180,7 +201,7 @@ netutils_init_socket(unsigned short *port, int use_ipv6, int use_udp)
+ 
+         /* Initialize sockaddr for bind */
+         sinptr->sin_family = family;
+-        sinptr->sin_addr.s_addr = INADDR_ANY;
++        sinptr->sin_addr = parkcast_bind_addr;
+         sinptr->sin_port = htons(*port);
+ 
+         socklen = sizeof(*sinptr);

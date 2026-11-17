@@ -1,0 +1,12 @@
+diff --git a/lib/dns_sd/dns_sd.c b/lib/dns_sd/dns_sd.c
+--- a/lib/dns_sd/dns_sd.c
++++ b/lib/dns_sd/dns_sd.c
+@@ -177,7 +177,7 @@ dnssd_private_init(dnssd_t *dnssd_public, int *error)
+         return NULL;
+     }
+ #elif USE_LIBDL
+-    dnssd->module = dlopen("libdns_sd.so", RTLD_LAZY);
++    dnssd->module = dlopen("libmdnssd.so", RTLD_LAZY); /* ParkCast: the head unit ships libmdnssd.so (AIR-042(d)(i)) */
+     if (!dnssd->module) {
+       if (error) *error = DNSSD_ERROR_LIBNOTFOUND;
+       free(dnssd);

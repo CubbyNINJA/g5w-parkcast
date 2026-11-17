@@ -1,0 +1,20 @@
+# Native dependency pins for libparkcast (AIR-042, AIR-044, OD-168). Read by tools/airplay_s3/native_prep.py.
+# OpenSSL: sha256 from the release's own .sha256 asset, matching openssl.org's copy (checked 2026-11-17).
+# libplist publishes no checksum; this sha256 is the 2.8.1 release asset, identical to the copy the
+# cross-build spike built with (CROSSBUILD_SPIKE_FINDINGS.md).
+
+[uxplay]
+url = https://github.com/FDH2/UxPlay.git
+commit = 05b0275cb1b726592700e47a6e0307544b3d3a52
+
+[dep openssl]
+name = OpenSSL
+version = 3.5.9
+url = https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz
+sha256 = 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+
+[dep libplist]
+name = libplist
+version = 2.8.1
+url = https://github.com/libimobiledevice/libplist/releases/download/2.8.1/libplist-2.8.1.tar.bz2
+sha256 = 2a1792e5820e1657c173735fde75baeebd6dd967d2ac47be1e3891ddc64ebefa
