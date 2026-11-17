@@ -338,14 +338,22 @@ Feature: The AirPlay receiver's runtime, with doubles
     And the Examples' callbacks equal the list produced by the @host unguarded-callback check
 
     Examples:
-      | callback                 |
-      | video_process            |
-      | video_set_codec_and_size |
-      | video_pause              |
-      | video_resume             |
-      | audio_process            |
-      | conn_feedback            |
-      | video_reset              |
+      | callback                       |
+      | video_process                  |
+      | video_set_codec_and_size       |
+      | video_pause                    |
+      | video_resume                   |
+      | audio_process                  |
+      | conn_feedback                  |
+      | video_reset                    |
+      | conn_reset                     |
+      | audio_set_client_volume        |
+      | on_video_play                  |
+      | on_video_scrub                 |
+      | on_video_rate                  |
+      | on_video_stop                  |
+      | on_video_acquire_playback_info |
+      | on_video_playlist_remove       |
 
   @offline @normal @AIR-055 @AT-55
   Scenario: video_set_codec_and_size accepts H.264 and passes the geometry on

@@ -18,3 +18,9 @@ NEMESIS-diag/
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
+
+# Receiver signing and native prep (AIR-047; specs/features/14_receiver_tools.feature)
+local.properties
+*.jks
+*.keystore
+receiver/native/.cache/

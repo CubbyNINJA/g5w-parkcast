@@ -146,7 +146,7 @@ checks the real thing on the unit.
    - Step 0 is `dup2` of fds 1 and 2 to `/dev/null`. On failure it logs `stdio redirect failed`, makes no
      library call and takes the AIR-069(d) path: no notice (AIR-055(f), file 13 l.365-372). With no library
      call allowed, the key check can't run, and AIR-055(f) and file 13 settle that overlap with AIR-069(f).
-   - `raop_init` with all seven callbacks non-NULL (AIR-055(g)). The log callback and level are set before
+   - `raop_init` with every callback on the committed unguarded list non-NULL, 15 of them (AIR-055(g), OD-191). The log callback and level are set before
      `raop_init2` and never again (AIR-072(a)).
    - `raop_init2` with the keyfile is the key check, always second (AIR-069(f), AIR-083). Patch (vi) is
      required. The library never opens an existing key file for writing. On a read or parse failure it
