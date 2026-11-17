@@ -6,17 +6,16 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
   own runtime behaviour is in 13_receiver_runtime.feature, and on-unit evidence is in
   15_receiver_unit.feature (AIR-042 to AIR-047, AIR-062, AIR-071, AIR-074 to AIR-079, AIR-083;
   OD-139, OD-143, OD-145, OD-154 to OD-156, OD-158, OD-160, OD-162, OD-163, OD-166, OD-168,
-  OD-169, OD-171 to OD-174, OD-177).
+  OD-169, OD-171 to OD-174, OD-177 to OD-184).
 
   `@host` scenarios read this PC's real build outputs: the APK from `./gradlew`, its native
   libraries, the build and SDK install logs, and the repository's files. `@offline` scenarios use
   synthetic fixtures only. No fixture holds a real iPhone name, IP address or MAC address.
 
-  Proposed marker texts (AIR-071, drafted here for owner review under OD-158 / AMB-102). Each is
-  one record, written by the receiver's logger after AIR-073's filter; the logger's own prefix
-  (timestamp and level) is not part of the text. `<n>` is the session number, counted from 1 at
-  each app start.
-    Start marker:      parkcast start app=<app version> commit=<git commit> uxplay=<UxPlay commit> product=<ro.build.product> require_park=<true|false>
+  Marker texts (AIR-071, OD-178), exact under AIR-071(f). Each is one record, written by the
+  receiver's logger after AIR-073's filter; the logger's own prefix (timestamp and level) is not
+  part of the text. `<n>` is the session number, counted from 1 at each app start (AIR-071(e)).
+    Start marker:      parkcast start app=<version> commit=<git commit> uxplay=<UxPlay commit> product=<ro.build.product> require_park=<true|false>
     Connection:        session <n> connection accepted model=<iPhone model>
     UxPlay setup:      Mirroring initialized successfully | Mirroring not initialized at SETUP  (UxPlay's own lines, unchanged)
     S3 codec line:     session <n> codec <h264|h265> <width>x<height>
@@ -24,7 +23,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     First frame:       session <n> first frame rendered
     Gate withheld:     session <n> first frame withheld by gate
     Session end:       session <n> end reason=<reason> withheld=<count>
-    End marker:        parkcast stop reason=<stop reason>
+    End marker:        parkcast stop reason=<reason>
   The `withheld=` count is AIR-073(c)'s count of dropped native records. `model=` is allowed by
   AIR-073(f) and carries the iPhone model only, never its name. Other records the evaluator reads
   keep the texts their own requirements give them: `hevc refused`, `decoder unavailable`,
@@ -46,6 +45,15 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
   fake tree: a fake unit root and a fake stick root. The fake `nemesis`, `pm`, `am`, `chown`,
   `chmod` and `cp` record every call with its arguments in order, and reject any option they do
   not know, as toolbox does on the unit.
+
+  The owner's other observations are in `run-checklist.txt` in the same folder (AIR-079(e)), one
+  `<key>: yes` or `<key>: no` line for each of the keys `parkcast listed`, `letterboxed`,
+  `sound on unit`, `stayed behind other app`, `nothing on cluster or hud` and
+  `carplay after exit`, in that order, read under AIR-079(f). A fixture has no `run-checklist.txt`
+  unless a step gives one. "The blank checklist" is the file the log-copy script places under
+  AIR-074(d): exactly the bytes
+  `parkcast listed: \nletterboxed: \nsound on unit: \nstayed behind other app: \nnothing on cluster or hud: \ncarplay after exit: \n`.
+  A step in which placing a file fails makes the fake stick refuse to create that one file.
 
   @offline @normal @AIR-042 @AT-42 @OD-174
   Scenario: Every UxPlay patch the build applies comes from the repository
@@ -221,8 +229,18 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And the originals' hashes are unchanged
     And the script exits 0
 
-  @offline @failure @AIR-074 @AT-74
-  Scenario: An interrupted copy is reported incomplete and fails the script
+  @offline @normal @AIR-074 @AIR-076 @AIR-079 @AT-74 @OD-181 @OD-182 @OD-184
+  Scenario: The log-copy script places a zero-byte note and the blank checklist, which read as nothing recorded
+    Given a fake unit tree with two receiver log files in "/data/nemesis/logs/airplay-receiver/"
+    When the log-copy stick script runs
+    Then the new "<timestamp>/" folder holds an "owner-note.txt" of zero bytes
+    And it holds a "run-checklist.txt" whose bytes are exactly the blank checklist
+    When the evaluator reads that folder
+    Then it reports every checklist key as "not recorded"
+    And it reads the owner's note as missing
+
+  @offline @failure @AIR-074 @AT-74 @OD-184
+  Scenario: An interrupted copy is reported incomplete and fails the script, and the blank files are still placed
     Given a fake unit tree with two receiver log files in "/data/nemesis/logs/airplay-receiver/"
     And the fake "cp" fails after copying the first file
     When the log-copy stick script runs
@@ -230,6 +248,45 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And the copy is never reported as complete
     And the script exits non-zero
     And the originals' hashes are unchanged
+    And the run's folder holds an "owner-note.txt" of zero bytes and the blank checklist as "run-checklist.txt"
+
+  @offline @boundary @AIR-074 @AT-74 @OD-184
+  Scenario Outline: An owner file already in the target folder is left byte for byte
+    Given a fake unit tree with two receiver log files in "/data/nemesis/logs/airplay-receiver/"
+    And the target folder already holds <existing file>
+    When the log-copy stick script runs
+    Then that file's hash is unchanged
+    And the script reports that it left "<file name>"
+
+    Examples:
+      | existing file                                                    | file name         |
+      | an "owner-note.txt" holding "picture: yes"                       | owner-note.txt    |
+      | a "run-checklist.txt" with all six keys "yes"                    | run-checklist.txt |
+
+  @offline @failure @AIR-074 @AT-74 @OD-184
+  Scenario Outline: A file that can't be placed is named, fails the script and leaves the copied logs alone
+    Given a fake unit tree with two receiver log files in "/data/nemesis/logs/airplay-receiver/"
+    And placing "<file name>" on the fake stick fails
+    When the log-copy stick script runs
+    Then the script names "<file name>"
+    And the script exits non-zero
+    And the copied logs' hashes are unchanged
+    And the copy is not reported as incomplete
+
+    Examples:
+      | file name         |
+      | owner-note.txt    |
+      | run-checklist.txt |
+
+  @offline @failure @AIR-074 @AT-74 @OD-184
+  Scenario: A run folder that already exists on the stick is refused
+    Given a fake unit tree with two receiver log files in "/data/nemesis/logs/airplay-receiver/"
+    And the fake stick already has the run's "NEMESIS-diag/airplay-receiver/<timestamp>/" folder with files in it
+    When the log-copy stick script runs
+    Then nothing is copied into that folder
+    And every file in that folder keeps its hash, and no file is added to it
+    And the script reports that the folder exists
+    And the script exits non-zero
 
   @offline @normal @AIR-083 @AIR-073 @AIR-074 @AT-83 @OD-170
   Scenario: The log copy never includes the identity key file
@@ -390,7 +447,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Then the script exits non-zero
     And the output of every command it ran is kept on the stick
 
-  @offline @normal @AIR-071 @AIR-075 @AT-71 @AMB-102 @OD-158
+  @offline @normal @AIR-071 @AIR-075 @AT-71 @OD-178
   Scenario: The evaluator reads every S3 marker of a complete log, in order
     Given a stick copy whose log is:
       """
@@ -419,11 +476,11 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And "git check-ignore" reports "runs/" as ignored
     And nothing it writes outside "runs/" contains a raw log line
 
-  @offline @normal @AIR-075 @AIR-077 @AT-75 @AT-77
-  Scenario: The S3 summary has the S1 summary fields and nothing else
+  @offline @normal @AIR-075 @AIR-077 @AT-75 @AT-77 @OD-183
+  Scenario: The S3 summary has the S1 summary fields, one Checklist: line and nothing else
     Given a synthetic stick copy of one run judged as a unit run
     When the evaluator writes the summary to "docs/evidence/"
-    Then the summary's lines are, in order, these S1 summary fields:
+    Then the summary has these S1 summary fields, in order:
       | field                  |
       | # AirPlay receiver ... |
       | Tier:                  |
@@ -434,7 +491,24 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | UxPlay build commit:   |
       | Head unit:             |
       | Firewall:              |
+    And it has exactly one line starting "Checklist: "
     And the summary has no other line
+
+  @offline @boundary @AIR-075 @AIR-079 @AT-75 @OD-183 @OD-184
+  Scenario Outline: Each checklist gives exactly one Checklist: line in key order, with no checklist text
+    Given a synthetic stick copy of one run judged as a unit run
+    And its "run-checklist.txt" is <checklist fixture>
+    When the evaluator writes the summary
+    Then the summary has exactly one line starting "Checklist: "
+    And that line is "<checklist line>"
+    And neither "secret text" nor "free text" appears anywhere in the summary
+
+    Examples:
+      | checklist fixture                                                                                                                        | checklist line |
+      | all six keys "yes"                                                                                                                       | Checklist: parkcast listed=yes; letterboxed=yes; sound on unit=yes; stayed behind other app=yes; nothing on cluster or hud=yes; carplay after exit=yes |
+      | "parkcast listed: yes", "letterboxed: no", "sound on unit: ", "stayed behind other app: yes", "nothing on cluster or hud: no", "carplay after exit: " | Checklist: parkcast listed=yes; letterboxed=no; sound on unit=not recorded; stayed behind other app=yes; nothing on cluster or hud=no; carplay after exit=not recorded |
+      | absent                                                                                                                                   | Checklist: parkcast listed=not recorded; letterboxed=not recorded; sound on unit=not recorded; stayed behind other app=not recorded; nothing on cluster or hud=not recorded; carplay after exit=not recorded |
+      | all six keys "yes" plus the lines "secret text: yes" and "free text"                                                                     | Checklist: parkcast listed=yes; letterboxed=yes; sound on unit=yes; stayed behind other app=yes; nothing on cluster or hud=yes; carplay after exit=yes |
 
   @offline @failure @AIR-075 @AIR-028 @AT-75
   Scenario Outline: A log without an S3 marker makes every session an evidence error
@@ -540,6 +614,80 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | "picture: maybe"                                                               | INCONCLUSIVE with the reason "owner note missing" |
       | an unreadable file                                                             | INCONCLUSIVE with the reason "owner note missing" |
       | "picture: yes" in "NEMESIS-diag/airplay-receiver/", outside the "<timestamp>/" folder | INCONCLUSIVE with the reason "owner note missing" |
+
+  @offline @boundary @AIR-076 @AT-76 @OD-179 @OD-180
+  Scenario: A picture line in the checklist never counts as the owner's note
+    Given a session that would be GO, apart from its note
+    And the run's "<timestamp>/" folder has no "owner-note.txt"
+    And its "run-checklist.txt" holds the line "picture: yes"
+    When the evaluator judges the run
+    Then the session's verdict is INCONCLUSIVE with the reason "owner note missing"
+    And the run's verdict is INCONCLUSIVE
+
+  @offline @boundary @AIR-076 @AT-76 @OD-179
+  Scenario Outline: The checklist changes no verdict of a GO run
+    Given a session that would be GO
+    And the run's "run-checklist.txt" is <checklist fixture>
+    When the evaluator judges the run
+    Then the session's verdict is GO
+    And the run's verdict is GO
+
+    Examples:
+      | checklist fixture   |
+      | all six keys "yes"  |
+      | all six keys "no"   |
+      | absent              |
+
+  @offline @boundary @AIR-054 @AIR-076 @AIR-079 @AT-54 @OD-179
+  Scenario Outline: The checklist's sound answer changes no verdict
+    Given a session that would be GO
+    And the run's "run-checklist.txt" is <checklist fixture>
+    When the evaluator judges the run
+    Then the session's verdict is GO
+    And the run's verdict is GO
+
+    Examples:
+      | checklist fixture                                                      |
+      | all six keys "yes" except "sound on unit: no"                          |
+      | all six keys "yes"                                                     |
+      | absent                                                                 |
+
+  @offline @boundary @AIR-079 @AT-79 @OD-180 @OD-182
+  Scenario Outline: A checklist key counts only from exactly one yes or no line
+    Given a synthetic stick copy of one run
+    And its "run-checklist.txt" in the run's "<timestamp>/" folder holds all six keys "yes" except that <letterboxed lines>
+    When the evaluator reads the checklist
+    Then it reports "letterboxed" as "<value>"
+    And it reports every other key as "yes"
+
+    Examples:
+      | letterboxed lines                                                  | value        |
+      | "letterboxed: yes" is unchanged                                    | yes          |
+      | the line is " Letterboxed : NO " and every line ends in CRLF       | no           |
+      | the line is "letterboxed:"                                         | not recorded |
+      | the line is "letterboxed: maybe"                                   | not recorded |
+      | "letterboxed: yes" appears on two lines                            | not recorded |
+      | there is no "letterboxed" line                                     | not recorded |
+
+  @offline @boundary @AIR-079 @AT-79 @OD-180
+  Scenario: Unknown-key and colon-less lines are named malformed and change no key
+    Given a synthetic stick copy of one run
+    And its "run-checklist.txt" holds all six keys "yes" plus the lines "secret text: yes" and "free text"
+    When the evaluator reads the checklist
+    Then it names both added lines as malformed
+    And it reports every one of the six keys as "yes"
+
+  @offline @boundary @AIR-079 @AT-79 @OD-180
+  Scenario Outline: An unreadable or misplaced checklist records nothing
+    Given a synthetic stick copy of one run
+    And the run's checklist is <checklist fixture>
+    When the evaluator reads the checklist
+    Then it reports every one of the six keys as "not recorded"
+
+    Examples:
+      | checklist fixture                                                                                         |
+      | an unreadable "run-checklist.txt" in the run's "<timestamp>/" folder                                     |
+      | a "run-checklist.txt" with all six keys "yes" in "NEMESIS-diag/airplay-receiver/", outside the "<timestamp>/" folder |
 
   @offline @boundary @AIR-076 @AT-76 @OD-154
   Scenario: A yes note with two sessions that rendered frames is ambiguous
@@ -663,10 +811,10 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And it never states "Tier: unit"
     And it says the result is a synthetic fixture result and not evidence about any iPhone
 
-  @host @normal @AIR-079 @AT-79 @OD-173
-  Scenario: The first on-unit run's checklist ends with the exit-and-CarPlay step
-    Given the checklist for the first on-unit S3 run in the repository
+  @host @normal @AIR-079 @AT-79 @OD-173 @OD-179
+  Scenario: The first on-unit run's procedure ends with the exit-and-CarPlay step
+    Given the procedure for the first on-unit S3 run in the repository
     When its steps are read
     Then its last step tells the owner to exit ParkCast and confirm wireless CarPlay connects as it did before the run
-    And that step records "carplay after exit: yes" or "carplay after exit: no" on the checklist
+    And that step records "carplay after exit: yes" or "carplay after exit: no" in "run-checklist.txt"
     And that step says not to record it in "owner-note.txt"

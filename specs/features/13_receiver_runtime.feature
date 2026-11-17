@@ -5,9 +5,9 @@ Feature: The AirPlay receiver's runtime, with doubles
   the dns_sd client. It takes H.264 Screen Mirroring only, decodes it with OMX.TCC.avcdec and plays no
   sound. The S2 gate decides every decoded frame. A start failure blocks video, keeps the screen
   black, shows one notice and leaves the activity open. Stop runs in a fixed order, and native log
-  records pass an allowlist filter before any write (AIR-048 to AIR-070, AIR-072, AIR-073, AIR-079
+  records pass an allowlist filter before any write (AIR-048 to AIR-073, AIR-079
   to AIR-083; OD-148, OD-150, OD-151, OD-153, OD-155, OD-158, OD-161, OD-164, OD-167, OD-169 to
-  OD-171, OD-174 to OD-177).
+  OD-171, OD-174 to OD-178).
 
   Clock times, "runs for", "within 10 ms", the default Park getter behaviour, the ACC registration
   steps, the two on-screen notices and their texts, the UI double, "shown at S", "an attempt fails"
@@ -543,19 +543,20 @@ Feature: The AirPlay receiver's runtime, with doubles
     Then the fake file system recorded config reads only of /data/nemesis/apps/airplay.receiver/config/receiver.conf
     And no create or write of that path
 
-  @offline @failure @AIR-063 @AT-63
+  @offline @failure @AIR-063 @AIR-071 @AT-63 @OD-178
   Scenario: With no config file, the parking check is on
     Given /data/nemesis/apps/airplay.receiver/config/receiver.conf does not exist
     When the receiver runs for 1000 ms
-    Then the start marker has the effective parking value true with "reason=the missing file"
+    Then the start marker has "require_park=true"
+    And the gate's start record has the effective value true with "reason=the missing file"
     And the fake file system recorded no create of that path
 
-  @offline @normal @AIR-064 @AT-64
+  @offline @normal @AIR-064 @AIR-071 @AT-64 @OD-178
   Scenario: The fixture build product counts as supported and is in the start marker
     Given ro.build.product is CVEV.CAN.0000.V015.011.260206
     When the receiver runs for 1000 ms
     Then mirrored video is permitted from 10 ms
-    And the start marker has "CVEV.CAN.0000.V015.011.260206"
+    And the start marker has "product=CVEV.CAN.0000.V015.011.260206"
 
   @offline @failure @AIR-064 @AT-64
   Scenario Outline: An empty or unreadable ro.build.product counts as unidentified
@@ -573,6 +574,27 @@ Feature: The AirPlay receiver's runtime, with doubles
   Scenario: The build is identified from ro.build.product, never Build.PRODUCT
     When the static scan runs
     Then it finds no Build.PRODUCT
+
+  @offline @normal @AIR-071 @AT-71 @OD-178
+  Scenario: Every marker is written in AIR-071's exact text, and a new app start numbers sessions from 1
+    Given a session starts at 1000 ms
+    And the library double delivers the allowlisted record "Mirroring initialized successfully" after reporting the accepted connection and before calling video_set_codec_and_size
+    And the session ends at 3000 ms
+    When the receiver runs for 4000 ms and then exit() is called
+    And the receiver is then started again with the car out of Park, a session starts at 1000 ms of that app start, and it runs for 2000 ms
+    Then the first app start's log, with the logger's prefix taken off each record, has these records in this order, each byte for byte:
+      | record                                                                                                                          |
+      | parkcast start app=<version> commit=<git commit> uxplay=<UxPlay commit> product=CVEV.CAN.0000.V015.011.260206 require_park=true |
+      | session 1 connection accepted model=<iPhone model>                                                                              |
+      | Mirroring initialized successfully                                                                                              |
+      | session 1 codec h264 1920x720                                                                                                   |
+      | decoder OMX.TCC.avcdec configured                                                                                               |
+      | session 1 first frame rendered                                                                                                  |
+      | session 1 end reason=<reason> withheld=0                                                                                        |
+      | parkcast stop reason=<reason>                                                                                                   |
+    And each <field> in those records holds the build's or the library double's value, with no other text
+    And the second app start's log has "session 1 connection accepted model=" and "session 1 first frame withheld by gate"
+    And the second app start's log has no "session 2"
 
   @offline @normal @AIR-065 @AT-65
   Scenario: The Scheduler is timed by SystemClock.uptimeMillis()
