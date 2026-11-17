@@ -51,7 +51,7 @@ then tests, then code. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `docs/evidence/` | Facts from the head unit and PC tests that the specs rely on, redacted |
 | `specs/features/` | Gherkin scenarios; tag rules in `specs/README.md` |
 | `tests/` | pytest-bdd bindings and step definitions for S1, plus the tag and traceability checks |
-| `receiver/gate/` | The parking gate, plain Java 7 (`src/main/java`), and its Cucumber-JVM S2 steps (`src/test/java`) |
+| `receiver/gate/` | The parking gate, plain Java 7 (`src/main/java`), and its Cucumber-JVM S2 steps and harness (`src/testFixtures/java`, shared with core under OD-189) |
 | `settings.gradle`, `gradlew` | The Gradle wrapper build for the Java code |
 | `tools/airplay_s1/`, `tools/s1.py` | The S1 PC test: build UxPlay, run it, analyse and judge the log |
 | `tools/unit-probes/` | Read-only probes run on the head unit from a USB stick |

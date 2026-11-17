@@ -82,7 +82,7 @@ checked only by its own Examples table.
 Each class takes its ports and collaborators in its constructor. No static state, so every scenario and
 every restart builds a fresh `Receiver`.
 
-## Test harness (`receiver/gate/src/test/java/parkcast/gate`)
+## Test harness (`receiver/gate/src/testFixtures/java/parkcast/gate`; moved there from `src/test` under OD-189)
 
 - **Doubles** (package `...gate.doubles`): one per port, each recording every call as
   `(time, cause, name, details)` in one shared, ordered `Trace`. `cause` is the innermost callback being

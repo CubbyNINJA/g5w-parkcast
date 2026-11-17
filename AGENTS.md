@@ -36,7 +36,7 @@ for behaviour that has no reviewed scenario. The loop is the owner's spec-first 
    features, regenerate traceability, and note in the review file what was applied. Ask the
    owner only when a finding needs an owner decision.
 6. **Tests first.** Write step definitions (S1: Python in `tests/steps/`; S2 and later receiver
-   slices: Java in `receiver/gate/src/test/java`, OD-133), and confirm they fail for the
+   slices: Java in `receiver/gate/src/testFixtures/java`, OD-133), and confirm they fail for the
    right reason before writing any code.
 7. **Implement** until the scenarios pass. Then run a mutation check on the new behaviour and
    the full offline suite.

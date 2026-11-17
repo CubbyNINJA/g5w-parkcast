@@ -2,6 +2,9 @@
 // the head unit's Android 4.4 (OD-132). Its S2 scenarios run with Cucumber-JVM (OD-133) from specs/features.
 plugins {
     id 'java'
+    // The S2 harness, World and step definitions are test fixtures, so receiver/core can rerun S2's
+    // scenarios against its adapters (OD-189). Fixtures never reach a release build.
+    id 'java-test-fixtures'
 }
 
 repositories {
@@ -9,10 +12,11 @@ repositories {
 }
 
 dependencies {
+    testFixturesApi platform('io.cucumber:cucumber-bom:7.20.1')
+    testFixturesApi 'io.cucumber:cucumber-java'
+    testFixturesApi 'io.cucumber:cucumber-picocontainer'
     testImplementation platform('io.cucumber:cucumber-bom:7.20.1')
     testImplementation platform('org.junit:junit-bom:5.11.3')
-    testImplementation 'io.cucumber:cucumber-java'
-    testImplementation 'io.cucumber:cucumber-picocontainer'
     testImplementation 'io.cucumber:cucumber-junit-platform-engine'
     testImplementation 'org.junit.platform:junit-platform-suite'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -25,6 +29,11 @@ tasks.named('compileJava') {
 }
 
 tasks.named('compileTestJava') {
+    options.release = 17
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('compileTestFixturesJava') {
     options.release = 17
     options.encoding = 'UTF-8'
 }

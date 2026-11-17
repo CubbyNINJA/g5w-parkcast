@@ -33,7 +33,7 @@ No production code or step definition without a reviewed scenario.
    `python tools/trace_specs.py`.
 4. **Coverage review.** The reviewer role checks the scenarios against the requirements. Save the
    review, apply its findings, and raise anything that needs the owner as an `AMB`.
-5. **Tests first.** Write step definitions (S1 in `tests/steps/`, S2 in `receiver/gate/src/test/java`) and
+5. **Tests first.** Write step definitions (S1 in `tests/steps/`, S2 in `receiver/gate/src/testFixtures/java`) and
    watch them fail for the right reason.
    Oracles must be independent of the code under test: fakes record what was actually asked of
    them, and the steps compare against the numbers in the scenario.

@@ -23,7 +23,8 @@ public final class StaticScan {
 
     public static StaticScan run() {
         StaticScan s = new StaticScan();
-        Path base = Paths.get(System.getProperty("user.dir"));
+        // The gate module directory; core sets parkcast.gate.dir when it reruns these scenarios (OD-189).
+        Path base = Paths.get(System.getProperty("parkcast.gate.dir", System.getProperty("user.dir")));
         s.collect(base.resolve("src/main/java"), ".java");
         s.collect(base.resolve("build/classes/java/main"), ".class");
         for (Path p : s.files) {
