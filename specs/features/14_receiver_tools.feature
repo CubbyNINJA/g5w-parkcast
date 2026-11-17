@@ -13,8 +13,8 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
   synthetic fixtures only. No fixture holds a real iPhone name, IP address or MAC address.
 
   Marker texts (AIR-071, OD-178), exact under AIR-071(f). Each is one record, written by the
-  receiver's logger after AIR-073's filter; the logger's own prefix (timestamp and level) is not
-  part of the text. `<n>` is the session number, counted from 1 at each app start (AIR-071(e)).
+  receiver's logger after AIR-073's filter; the logger's own prefix (AIR-071(g): the uptime in
+  milliseconds as decimal digits and one space) is not part of the text. `<n>` is the session number, counted from 1 at each app start (AIR-071(e)).
     Start marker:      parkcast start app=<version> commit=<git commit> uxplay=<UxPlay commit> product=<ro.build.product> require_park=<true|false>
     Connection:        session <n> connection accepted model=<iPhone model>
     UxPlay setup:      Mirroring initialized successfully | Mirroring not initialized at SETUP  (UxPlay's own lines, unchanged)
@@ -24,10 +24,13 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Gate withheld:     session <n> first frame withheld by gate
     Session end:       session <n> end reason=<reason> withheld=<count>
     End marker:        parkcast stop reason=<reason>
-  The `withheld=` count is AIR-073(c)'s count of dropped native records. `model=` is allowed by
-  AIR-073(f) and carries the iPhone model only, never its name. Other records the evaluator reads
-  keep the texts their own requirements give them: `hevc refused`, `decoder unavailable`,
-  `decoder error`, `port busy <proto> <port>`, `advertise failed`, and `carplay listener present`,
+  Session-end reasons are `iphone disconnected`, `hevc refused`, `decoder unavailable`,
+  `decoder error` and `stop`; end-marker reasons are `owner exit` and `destroy` (AIR-071(b), (c);
+  OD-185). The `withheld=` count is AIR-073(c)'s count of dropped native records. `model=` is
+  allowed by AIR-073(f) and carries the iPhone model only, never its name. Other records the
+  evaluator reads keep the texts their own requirements give them: `hevc refused`,
+  `decoder unavailable`, `decoder error`, `port busy <tcp|udp> <port>`,
+  `advertise failed reason=<token> code=<n|none>` (OD-185), and `carplay listener present`,
   `carplay listener absent` or `carplay listener unknown`.
 
   Log fixtures follow specs/README.md's rules, with S3's markers in place of S1's. A step that
@@ -36,14 +39,16 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
   after it. The start marker's `uxplay=` field stands in for UxPlay's version banner, which
   `uxplay.cpp` prints and S3 does not build (AIR-042(b)). A step that names a damaged log builds
   that log deliberately and doesn't wrap it. "At <t> s" gives a record a timestamp <t> seconds
-  after the run's first start marker; the step definitions write it in the logger's prefix.
+  after the run's first start marker; the step definitions write it as the record's AIR-071(g)
+  prefix, the uptime in milliseconds as decimal digits followed by one space. A record with no
+  parseable prefix counts as at or after the deadline (AIR-076(h)).
   "A session that would be GO" is one session with `connection accepted`, a `codec h264` line,
   `decoder OMX.TCC.avcdec configured` and `first frame rendered`, with `picture: yes` in the note.
 
   The owner's note is `owner-note.txt` in the run's `NEMESIS-diag/airplay-receiver/<timestamp>/`
   folder on a fake stick (AIR-076(e)). Stick scripts run under the host's POSIX `sh` against a
   fake tree: a fake unit root and a fake stick root. The fake `nemesis`, `pm`, `am`, `chown`,
-  `chmod` and `cp` record every call with its arguments in order, and reject any option they do
+  `chmod`, `mkdir` and `cp` record every call with its arguments in order, and reject any option they do
   not know, as toolbox does on the unit.
 
   The owner's other observations are in `run-checklist.txt` in the same folder (AIR-079(e)), one
@@ -220,6 +225,31 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     When "./gradlew" builds the receiver
     Then the build output does not contain either test password
 
+  @host @normal @AIR-055 @AT-55
+  Scenario: The JNI sources look up no Android framework, vehicle, audio or display class
+    Given the receiver's JNI sources in the repository
+    When the static check scans them for FindClass, GetMethodID and GetStaticMethodID arguments
+    Then no argument names a class under "android.", "com.hkmc." or "com.mobis.", or any audio or display class
+
+  @host @normal @AIR-055 @AT-55
+  Scenario: Every callback the pinned UxPlay source calls without a NULL check is listed and set
+    Given the pinned, patched UxPlay source
+    When the static check lists every raop_callbacks_t member the source calls without a preceding NULL check
+    Then the build log has the line "unguarded callbacks: " followed by that list, comma-separated
+    And the host callback table sets every member on that list to a non-NULL function
+
+  @host @normal @AIR-063 @AT-63
+  Scenario: The built APK carries no receiver.conf
+    Given the signed APK from a clean "./gradlew" build on this PC
+    When the build check lists the APK's entries
+    Then no entry is named "receiver.conf", in any folder
+
+  @host @normal @AIR-068 @AT-68
+  Scenario: The built APK asks for INTERNET and nothing else
+    Given the signed APK from a clean "./gradlew" build on this PC
+    When the build check runs "aapt dump permissions" on it
+    Then the uses-permission lines name exactly "android.permission.INTERNET"
+
   @offline @normal @AIR-074 @AT-74 @OD-149
   Scenario: The log-copy script copies the receiver's logs and leaves the originals unchanged
     Given a fake unit tree with two receiver log files in "/data/nemesis/logs/airplay-receiver/"
@@ -250,18 +280,21 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And the originals' hashes are unchanged
     And the run's folder holds an "owner-note.txt" of zero bytes and the blank checklist as "run-checklist.txt"
 
-  @offline @boundary @AIR-074 @AT-74 @OD-184
-  Scenario Outline: An owner file already in the target folder is left byte for byte
+  @offline @boundary @AIR-074 @AT-74 @OD-184 @OD-185
+  Scenario Outline: A file that appears in the run's folder during the run is kept, and the copy goes on
     Given a fake unit tree with two receiver log files in "/data/nemesis/logs/airplay-receiver/"
-    And the target folder already holds <existing file>
+    And the run's timestamped folder on the stick does not exist before the run
+    And the fake "cp" creates <existing file> in the run's folder before it copies the first log
     When the log-copy stick script runs
     Then that file's hash is unchanged
     And the script reports that it left "<file name>"
+    And every log was copied
+    And the script exits 0
 
     Examples:
-      | existing file                                                    | file name         |
-      | an "owner-note.txt" holding "picture: yes"                       | owner-note.txt    |
-      | a "run-checklist.txt" with all six keys "yes"                    | run-checklist.txt |
+      | existing file                                 | file name         |
+      | an "owner-note.txt" holding "picture: yes"    | owner-note.txt    |
+      | a "run-checklist.txt" with all six keys "yes" | run-checklist.txt |
 
   @offline @failure @AIR-074 @AT-74 @OD-184
   Scenario Outline: A file that can't be placed is named, fails the script and leaves the copied logs alone
@@ -349,11 +382,17 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Then the check <result>
 
     Examples:
-      | field         | length | result                         |
-      | short-desc    | 64     | accepts it                     |
+      | field         | length | result                          |
+      | short-desc    | 64     | accepts it                      |
       | short-desc    | 65     | refuses it naming short-desc    |
-      | detailed-desc | 256    | accepts it                     |
+      | detailed-desc | 256    | accepts it                      |
       | detailed-desc | 257    | refuses it naming detailed-desc |
+
+  @offline @boundary @AIR-078 @AT-78
+  Scenario: Surrounding quotes do not count toward the short-desc limit
+    Given an install manifest fixture whose short-desc is 64 characters long, written in surrounding quotes (66 characters with them)
+    When the install zip check runs on it
+    Then the check accepts it
 
   @offline @boundary @AIR-078 @AT-78 @OD-172 @OD-171
   Scenario Outline: An os or models line that is not exactly its value is refused
@@ -376,17 +415,28 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | models | "models=cvev_us"                                          |
       | models | "models=cvev* " with a trailing space                     |
 
-  @offline @boundary @AIR-078 @AT-78
-  Scenario Outline: The os and models lengths are checked against the 256-byte limit
-    Given an install manifest fixture whose <key> value is 256 bytes long
+  @offline @boundary @AIR-078 @AT-78 @OD-185
+  Scenario Outline: The os and models lengths are checked at the 255-byte edge
+    Given an install manifest fixture whose <key> value is <length> bytes long
     When the install zip check runs on it
-    Then the check refuses it
-    And the check's findings include <key> at or over 256 bytes
+    Then the check's findings <length finding>
 
     Examples:
-      | key    |
-      | os     |
-      | models |
+      | key    | length | length finding                                   |
+      | os     | 255    | have no line starting "os: longer than"          |
+      | os     | 256    | include the line "os: longer than 255 bytes"     |
+      | models | 255    | have no line starting "models: longer than"      |
+      | models | 256    | include the line "models: longer than 255 bytes" |
+
+  @offline @failure @AIR-078 @AT-78 @OD-185
+  Scenario: The package check reports every failed rule, not only the first
+    Given an install manifest fixture whose short-desc is 65 characters long and whose models value is 256 bytes long
+    When the install zip check runs on it
+    Then the check refuses it
+    And its findings include a line naming short-desc
+    And its findings include the line "models: longer than 255 bytes"
+    And each failed rule has its own line
+    And no install zip is produced
 
   @offline @normal @AIR-078 @AT-78 @OD-160 @OD-163 @OD-156
   Scenario: The install script installs through NEMESIS, checks, prepares the log directory, then starts
@@ -447,7 +497,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Then the script exits non-zero
     And the output of every command it ran is kept on the stick
 
-  @offline @normal @AIR-071 @AIR-075 @AT-71 @OD-178
+  @offline @normal @AIR-071 @AIR-075 @AT-71 @OD-178 @OD-185
   Scenario: The evaluator reads every S3 marker of a complete log, in order
     Given a stick copy whose log is:
       """
@@ -468,6 +518,23 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And session 1's markers are read in this order: connection accepted, mirroring initialized, codec h264 1920x720, decoder configured, first frame withheld by gate, first frame rendered, session end with reason "iphone disconnected"
     And the end marker gives the stop reason "owner exit"
 
+  @offline @boundary @AIR-071 @AIR-075 @AT-71 @OD-185 @OD-186
+  Scenario Outline: The evaluator reads each session-end reason and each stop reason
+    Given a complete stick copy whose session 1 ends with "session 1 end reason=<end reason> withheld=0"
+    And whose end marker is "parkcast stop reason=<stop reason>"
+    When the evaluator reads the log
+    Then the log is complete
+    And session 1's end reason is "<end reason>"
+    And the end marker gives the stop reason "<stop reason>"
+
+    Examples:
+      | end reason          | stop reason |
+      | iphone disconnected | owner exit  |
+      | hevc refused        | owner exit  |
+      | decoder unavailable | destroy     |
+      | decoder error       | destroy     |
+      | stop                | owner exit  |
+
   @offline @normal @AIR-075 @AT-75
   Scenario: The evaluator keeps raw logs only under the ignored runs folder
     Given a synthetic stick copy of one run
@@ -476,7 +543,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And "git check-ignore" reports "runs/" as ignored
     And nothing it writes outside "runs/" contains a raw log line
 
-  @offline @normal @AIR-075 @AIR-077 @AT-75 @AT-77 @OD-183
+  @offline @normal @AIR-075 @AIR-077 @AT-75 @AT-77 @OD-183 @OD-185
   Scenario: The S3 summary has the S1 summary fields, one Checklist: line and nothing else
     Given a synthetic stick copy of one run judged as a unit run
     When the evaluator writes the summary to "docs/evidence/"
@@ -492,6 +559,8 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
       | Head unit:             |
       | Firewall:              |
     And it has exactly one line starting "Checklist: "
+    And the line after "Firewall:" is the "Checklist: " line, and it is the summary's last line
+    And the summary has no blank line
     And the summary has no other line
 
   @offline @boundary @AIR-075 @AIR-079 @AT-75 @OD-183 @OD-184
@@ -540,27 +609,85 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And the run's verdict is GO
     And the verdict cites the log lines it rests on and "owner-note.txt"
 
-  @offline @normal @AIR-076 @AT-76 @OD-139
-  Scenario Outline: A session that connected but could not show an H.264 picture is NO-GO
+  @offline @normal @AIR-076 @AT-76 @OD-139 @OD-185
+  Scenario: A session in which the decoder could not be created is NO-GO
     Given a receiver log excerpt with these lines:
       """
       session 1 connection accepted model=iPhone15,2
-      <what happened>
-      session 1 end reason=<end reason> withheld=0
+      Mirroring initialized successfully
+      session 1 codec h264 1920x720
+      decoder unavailable IllegalStateException
+      session 1 end reason=decoder unavailable withheld=0
       """
-    And the owner's note says "<note>"
+    And the owner's note says "picture: no"
     When the evaluator judges the run
     Then the session's verdict is NO-GO
-    And the verdict cites the line "<cited line>"
+    And the verdict cites the line "decoder unavailable IllegalStateException"
     And the run's verdict is NO-GO
 
-    Examples:
-      | what happened                                                                                      | end reason          | note        | cited line                                 |
-      | Mirroring initialized successfully\nsession 1 codec h264 1920x720\ndecoder unavailable IllegalStateException | decoder unavailable | picture: no | decoder unavailable IllegalStateException  |
-      | Mirroring initialized successfully\nsession 1 codec h264 1920x720\ndecoder OMX.TCC.avcdec configured\ndecoder error  | decoder error       | picture: no | decoder error                              |
-      | Mirroring initialized successfully\nsession 1 codec h265 1920x720\nhevc refused                    | hevc refused        | picture: no | session 1 codec h265 1920x720              |
-      | Mirroring not initialized at SETUP                                                                 | iphone disconnected | picture: no | Mirroring not initialized at SETUP         |
-      | Mirroring initialized successfully\nsession 1 codec h264 1920x720\ndecoder OMX.TCC.avcdec configured\nsession 1 first frame rendered | iphone disconnected | picture: no | picture: no |
+  @offline @normal @AIR-076 @AT-76 @OD-139 @OD-185
+  Scenario: A session in which the decoder failed after it was configured is NO-GO
+    Given a receiver log excerpt with these lines:
+      """
+      session 1 connection accepted model=iPhone15,2
+      Mirroring initialized successfully
+      session 1 codec h264 1920x720
+      decoder OMX.TCC.avcdec configured
+      decoder error
+      session 1 end reason=decoder error withheld=0
+      """
+    And the owner's note says "picture: no"
+    When the evaluator judges the run
+    Then the session's verdict is NO-GO
+    And the verdict cites the line "decoder error"
+    And the run's verdict is NO-GO
+
+  @offline @normal @AIR-076 @AT-76 @OD-139 @OD-185
+  Scenario: A session in which the iPhone sent HEVC is NO-GO
+    Given a receiver log excerpt with these lines:
+      """
+      session 1 connection accepted model=iPhone15,2
+      Mirroring initialized successfully
+      session 1 codec h265 1920x720
+      hevc refused
+      session 1 end reason=hevc refused withheld=0
+      """
+    And the owner's note says "picture: no"
+    When the evaluator judges the run
+    Then the session's verdict is NO-GO
+    And the verdict cites the line "session 1 codec h265 1920x720"
+    And the run's verdict is NO-GO
+
+  @offline @normal @AIR-076 @AT-76 @OD-139 @OD-185
+  Scenario: A session in which mirroring was not initialized is NO-GO
+    Given a receiver log excerpt with these lines:
+      """
+      session 1 connection accepted model=iPhone15,2
+      Mirroring not initialized at SETUP
+      session 1 end reason=iphone disconnected withheld=0
+      """
+    And the owner's note says "picture: no"
+    When the evaluator judges the run
+    Then the session's verdict is NO-GO
+    And the verdict cites the line "Mirroring not initialized at SETUP"
+    And the run's verdict is NO-GO
+
+  @offline @normal @AIR-076 @AT-76 @OD-139 @OD-185
+  Scenario: A session in which frames rendered but the owner saw no picture is NO-GO
+    Given a receiver log excerpt with these lines:
+      """
+      session 1 connection accepted model=iPhone15,2
+      Mirroring initialized successfully
+      session 1 codec h264 1920x720
+      decoder OMX.TCC.avcdec configured
+      session 1 first frame rendered
+      session 1 end reason=iphone disconnected withheld=0
+      """
+    And the owner's note says "picture: no"
+    When the evaluator judges the run
+    Then the session's verdict is NO-GO
+    And the verdict cites the line "picture: no"
+    And the run's verdict is NO-GO
 
   @offline @normal @AIR-076 @AT-76 @OD-26
   Scenario: A run in which no iPhone connected is INCONCLUSIVE
@@ -697,7 +824,7 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Then each session's verdict is INCONCLUSIVE with the reason "owner note ambiguous"
     And neither session is GO
 
-  @offline @failure @AIR-076 @AT-76 @OD-155
+  @offline @failure @AIR-076 @AT-76 @OD-155 @OD-185
   Scenario Outline: A start failure in the logs keeps the run from GO
     Given a session that would be GO
     And the run's logs also contain "<record>"
@@ -706,9 +833,9 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And the run's verdict is not GO
 
     Examples:
-      | record             | reason           |
-      | port busy tcp 35000 | port busy        |
-      | advertise failed   | advertise failed |
+      | record                                              | reason           |
+      | port busy tcp 35000                                 | port busy        |
+      | advertise failed reason=discovery-timeout code=none | advertise failed |
 
   @offline @failure @AIR-076 @AIR-079 @AT-76 @OD-162
   Scenario: A CarPlay listener present at start keeps the run from GO
@@ -790,6 +917,36 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     Then the deadline is at 600 s, counted from the first start marker
     And the session's verdict is INCONCLUSIVE with the reason "timeout"
 
+  @offline @boundary @AIR-076 @AT-76 @OD-185
+  Scenario Outline: A record with no parseable uptime prefix never counts toward GO
+    Given a session that would be GO, with its first frame rendered at 120 s
+    And the "first frame rendered" record's prefix is <prefix>
+    And the end marker at 700 s
+    When the evaluator judges the run
+    Then the session's verdict is INCONCLUSIVE with the reason "timeout"
+
+    Examples:
+      | prefix                                  |
+      | missing                                 |
+      | "12x000 " (a letter among the digits)   |
+      | "120000" with no space after the digits |
+
+  @offline @failure @AIR-076 @AT-76 @OD-185 @OD-186
+  Scenario: A first start marker with no parseable uptime prefix makes every session an evidence error
+    Given a stick copy with two sessions that would each be GO
+    And the run's first "parkcast start" record has no uptime prefix
+    When the evaluator judges the run
+    Then every session's verdict is INCONCLUSIVE with the reason "evidence error"
+
+  @offline @boundary @AIR-076 @AT-76 @OD-185
+  Scenario: UxPlay's own lines belong to the latest session that has not logged its end
+    Given a receiver log in which session 1 is accepted at 10 s and logs its end record at 40 s
+    And session 2 is accepted at 50 s
+    And the UxPlay line "Mirroring not initialized at SETUP" at 45 s, and again at 60 s
+    When the evaluator judges the run
+    Then the line at 45 s belongs to no session
+    And the line at 60 s belongs to session 2
+
   @offline @normal @AIR-077 @AT-77 @OD-139
   Scenario: A unit result states its tier, build, model, iOS version and UxPlay commit
     Given a synthetic stick copy of one run judged as a unit run
@@ -803,13 +960,15 @@ Feature: The tools around the AirPlay receiver: build checks, stick scripts and 
     And it states the iOS version "18.0 (22A0000)" exactly as entered
     And it states the UxPlay commit "05b0275cb1b726592700e47a6e0307544b3d3a52"
 
-  @offline @normal @AIR-077 @AT-77
+  @offline @normal @AIR-075 @AIR-077 @AT-75 @AT-77 @OD-185 @OD-186
   Scenario: A result from offline fixtures is labelled offline and never unit
     Given a synthetic log fixture judged by the offline suite
     When the evaluator writes the summary
     Then the summary states "Tier: offline"
     And it never states "Tier: unit"
     And it says the result is a synthetic fixture result and not evidence about any iPhone
+    And the line after "Firewall:" is exactly "Checklist: not run (offline)", and it is the summary's last line
+    And the summary has no blank line
 
   @host @normal @AIR-079 @AT-79 @OD-173 @OD-179
   Scenario: The first on-unit run's procedure ends with the exit-and-CarPlay step

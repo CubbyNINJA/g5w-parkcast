@@ -221,3 +221,55 @@ Slice and tier tags follow each file's Feature-line convention. Scenarios below 
 - The OD-179, OD-181 and OD-184 texts beyond the lines I read.
 - The S1 summary field order, checked against S1 scenarios but not against docs/evidence files.
 - No S3 code or step definitions exist, so this review makes no claim about current behaviour.
+
+## Applied (2026-11-16)
+
+Applied against requirements revision 9, OD-185 and OD-186. Line numbers are the scenario lines
+after the change (13 = `13_receiver_runtime.feature`, 14 = `14_receiver_tools.feature`,
+15 = `15_receiver_unit.feature`).
+
+### Findings
+
+- **1** Applied. 13:94 asserts `port busy <proto> <port>`, with tcp/udp rows. 13:204 asserts `advertise failed reason=ENOENT code=none`. 13:213 has full `reason=<token> code=<n|none>` cells. 13:290 asserts `refused url|hls|drm`. 13:439 asserts `java.util.concurrent.TimeoutException`. 13:932 asserts `java.lang.NumberFormatException`. All carry @OD-185.
+- **2** Applied. 13:599 checks the marker texts. The 13:620 session-end outline and the 13:635 stop outline each carry @OD-185 and @OD-186. On the evaluator side: 14:501 (complete log) and a new outline at 14:522 covering the five end reasons and two stop reasons. On the unit side: 15:110 (exact `parkcast stop reason=owner exit|destroy`) and 15:117 (one of five end reasons, one stop marker, uptime prefix).
+- **3** Applied with the caller's correction. 13:431 uses OD-63's rule (`09_parking_gate.feature:101-106`): the next call starts at once after a late reply. The cadence is 0/200/400/750/950 ms, tagged @OD-63, not the review's fixed grid.
+- **4** Applied as section 9 below (14:284).
+- **5** Applied as section 7 below (13:181).
+- **6** Applied. 13:204 now asserts 21 attempts, the last at 5,000 ms, then the failure record.
+- **7** Applied as section 1 below (EPERM and unreachable rows in 13:213).
+- **8** Applied as section 6 below (13:893, 13:909).
+- **9-11** Applied as section 2 below (13:510, 13:554, 13:668).
+- **12** Applied as sections 3-5 below (14:229, 14:235, 14:242, 14:248).
+- **13** Applied. The 13:333 Examples now have a step saying they equal the list produced by the @host unguarded-callback check (14:235).
+- **14** Applied with a change. See section 8 below.
+- **15** Applied as a separate scenario at 14:392 (a quoted 64-character short-desc is accepted), not as a table row. A row read badly in the outline's steps. It has no @OD tag, because quote handling is not an OD-185 ruling.
+- **16** Applied. The fakes list at 14:51 includes `mkdir`.
+- **17** Applied. The 14:43 header uses the uptime-ms prefix, and an unparseable record counts as at or after the deadline. New scenarios: 14:921 (no parseable prefix never counts toward GO), 14:935 (unparseable first start marker gives `evidence error`, @OD-186) and 14:942 (UxPlay lines belong to the latest open session).
+- **18** Applied with the caller's correction. In 14:547 the unit summary puts `Checklist:` last, after `Firewall:`, with no blank lines. 14:964 is an offline summary (Tier offline) and carries `Checklist: not run (offline)`. Fixtures that emulate unit runs keep the six-key line.
+- **19** Applied. The NO-GO outline is split into five scenarios (14:613, 14:629, 14:646, 14:662, 14:676), so no cell contains `\n`.
+- **20** Applied. 14:828 rows use `port busy tcp 35000` and `advertise failed reason=discovery-timeout code=none`, and 14:868 uses `port busy tcp 35000`.
+
+### Missing scenarios
+
+- **§1** Applied. The EPERM, ECONNREFUSED and ETIMEDOUT→`unreachable` rows are in the 13:213 Examples.
+- **§2** Applied, rephrased so it can be implemented. The scenarios at 13:510 (AT-60), 13:554 (AT-62) and 13:668 (AT-66) each rerun the S2 scenarios selected by a tag expression against the Android adapter: `@S2 and @AIR-041 and @offline`, `@S2 and @AIR-039 and @offline` and `@S2 and @AIR-038 and @offline`. S2's text is not duplicated. AT-66 takes @AIR-038 as S2's RegulationLog requirement. The Cucumber glue needs a second run profile that selects S2 features with the Android adapter bound (see Traceability).
+- **§3** Applied at 14:229 and 14:235 (@host AT-55). The callback list is written after "unguarded callbacks: " rather than as `<comma list>`, which pytest-bdd would read as a placeholder.
+- **§4** Applied at 14:242 (@host AT-63). It adds a Given for the clean gradlew-built APK.
+- **§5** Applied at 14:248 (@host AT-68), with the same Given.
+- **§6** Applied at 13:893 (header lines and raw key material outline) and 13:909 (31-character hex and 43-character base64 runs are kept).
+- **§7** Applied at 13:181. The rows are 4999, 5000 (late), 5001 and never.
+- **§8** Applied with a change, at 14:419 and 14:432. The tier stays @offline, not @host, because it uses synthetic package fixtures. AIR-078(c) refuses any os or models value that is not exact, so a 255-byte value of junk is still refused. The 255-byte rows therefore assert only that there is no "longer than" line, and the 256-byte rows assert "longer than 255 bytes". 14:432 checks that every failed rule is reported.
+- **§9** Applied at 14:284, tagged @offline, not @pc, per the caller's correction. The Given says the run's timestamped folder does not exist before the run, so there is no unbound `<timestamp>` placeholder. The fake cp creates a file during the run, and the steps check four things: its hash is unchanged, the script reports leaving it, every log was copied, and the script exits 0.
+
+### Requirement wording and traceability
+
+- (a)-(i) and the AIR-078 every-failed-rule wording are in REQUIREMENTS revision 9 under OD-185 and OD-186. No feature edit was needed beyond the scenarios above.
+- (j) is a DECISIONS editorial note, not a feature change.
+- The tags @OD-185 and @OD-186 were added where those rulings are asserted.
+- In 14, `<reason>` appears only in the header's description, which is not a byte-exact assertion. The vocabulary is listed there.
+- The second Cucumber run profile for section 2 is noted, not built, because no step definitions exist yet.
+- `tools/trace_specs.py --check` is clean, and `docs/spec/TRACEABILITY.md` is regenerated.
+
+### Not changed
+
+- The AT-69 table in 13 was already misaligned before this change and is left as it was.

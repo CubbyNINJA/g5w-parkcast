@@ -26,11 +26,12 @@ Feature: The AirPlay receiver on the owner's head unit (video only)
     Then the probe output shows the receiver's uid bound only to 192.168.0.1 on TCP 35000-35001 and UDP 35000-35002
     And the probe output shows no entry for the receiver in /proc/net/tcp6 or /proc/net/udp6
 
-  @normal @AIR-050 @AIR-069 @AIR-079 @AT-50 @OD-148 @OD-164 @OD-179 @OD-182
+  @normal @AIR-050 @AIR-069 @AIR-079 @AT-50 @OD-148 @OD-164 @OD-179 @OD-182 @OD-185
   Scenario: The receiver advertises itself as ParkCast, or logs why it could not
     Given the receiver package is installed unmodified on the owner's unit
     When the receiver starts with the iPhone on the hotspot
-    Then the stick log shows either "mdnsd up" and "advertise ok", or "advertise failed" with its reason
+    Then the stick log shows either "mdnsd up" and "advertise ok", or a line starting "advertise failed reason="
+    And any "advertise failed" line has one of AIR-050's reason tokens and a "code=" value that is a number or "none"
     And a read-only probe output records the owner, group and mode of /dev/socket/mdnsd
     And the run's "run-checklist.txt" records "parkcast listed: yes"
 
@@ -105,19 +106,21 @@ Feature: The AirPlay receiver on the owner's head unit (video only)
     Then the probe output shows no receiver process
     And a crash that did not happen in the run is listed as unexercised
 
-  @normal @AIR-070 @AIR-071 @AT-70 @OD-178
+  @normal @AIR-070 @AIR-071 @AT-70 @OD-178 @OD-185
   Scenario: A finished run ends with the end marker and releases its ports
     Given the receiver has run a session
     When the receiver stops
-    Then the stick log's last line is the end marker "parkcast stop reason=<reason>"
+    Then the stick log's last line, after its uptime prefix, is exactly "parkcast stop reason=owner exit" or exactly "parkcast stop reason=destroy"
     And a post-run probe output shows nothing bound on TCP 35000-35001 or UDP 35000-35002
 
-  @normal @AIR-071 @AT-71 @OD-178
+  @normal @AIR-071 @AT-71 @OD-178 @OD-185 @OD-186
   Scenario: The copied log holds the start marker, the session markers and the end marker
     Given the owner has copied the receiver's log to the stick
     Then the copied log contains "parkcast start app=<version> commit=<git commit> uxplay=<UxPlay commit> product=<ro.build.product> require_park=<true|false>"
     And it contains, in AIR-071's texts, the "session <n>" markers that occurred
-    And it contains "parkcast stop reason=<reason>"
+    And every session end marker's reason is one of "iphone disconnected", "hevc refused", "decoder unavailable", "decoder error" or "stop"
+    And it contains exactly one of "parkcast stop reason=owner exit" or "parkcast stop reason=destroy"
+    And every record starts with the uptime in milliseconds as decimal digits followed by one space
 
   @normal @AIR-072 @AT-72
   Scenario: The copied log keeps UxPlay's mirroring line

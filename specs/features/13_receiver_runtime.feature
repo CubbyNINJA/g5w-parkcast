@@ -61,7 +61,9 @@ Feature: The AirPlay receiver's runtime, with doubles
   /data/nemesis/logs/airplay-receiver/, the config path, /proc/net/tcp and a fake stick. It records
   every create, write, mkdir, chmod, chown, rename and delete with its path, mode and time, and can
   make any of them throw. "The log" is the receiver's log files in the log directory. "The start
-  marker" and "the end marker" are AIR-071(a)'s and (c)'s records. The MirrorSession and VehicleBus
+  marker" and "the end marker" are AIR-071(a)'s and (c)'s records. "A record that is exactly T"
+  means a log line that is the uptime in milliseconds as decimal digits, one space, and then T byte
+  for byte, with nothing after it (AIR-071(g)). The MirrorSession and VehicleBus
   doubles are the ones from S2_GATE.md, and record every call made on them.
 
   "The static scan" reads the receiver's app sources, native sources, compiled classes and
@@ -88,11 +90,11 @@ Feature: The AirPlay receiver's runtime, with doubles
     And all five binds returned before the first dns_sd registration
     And the log has "advertise ok"
 
-  @offline @failure @AIR-048 @AIR-069 @AT-48 @OD-150 @OD-169 @OD-174 @OD-175
+  @offline @failure @AIR-048 @AIR-069 @AT-48 @OD-150 @OD-169 @OD-174 @OD-175 @OD-185
   Scenario Outline: A taken port stops the start, and no other port is tried
     Given <proto> port <port> is taken
     When the receiver runs for 10000 ms
-    Then the log has "port busy <proto> <port>"
+    Then the log has a record that is exactly "port busy <proto> <port>"
     And no dns_sd registration was sent and no accept call was made
     And no bind was attempted on any port outside the five ports
     And every one of the five ports that the receiver bound was closed by 0 ms
@@ -102,11 +104,11 @@ Feature: The AirPlay receiver's runtime, with doubles
 
     Examples:
       | proto | port  |
-      | TCP   | 35000 |
-      | TCP   | 35001 |
-      | UDP   | 35000 |
-      | UDP   | 35001 |
-      | UDP   | 35002 |
+      | tcp   | 35000 |
+      | tcp   | 35001 |
+      | udp   | 35000 |
+      | udp   | 35001 |
+      | udp   | 35002 |
 
   @offline @failure @AIR-048 @AIR-069 @AT-48 @OD-150 @OD-169 @OD-174 @OD-175
   Scenario Outline: A missing hotspot address stops the start, with no fallback, wait or repeat
@@ -175,7 +177,7 @@ Feature: The AirPlay receiver's runtime, with doubles
     Then no log record contains "Fixture Speaker"
     And the receiver made no call on the fake NsdManager after onDiscoveryStarted
 
-  @offline @boundary @AIR-050 @AT-50 @OD-164
+  @offline @boundary @AIR-050 @AT-50 @OD-164 @OD-185
   Scenario Outline: onDiscoveryStarted counts only within 5,000 ms of discoverServices
     Given discoverServices returns at 0 ms
     And the fake NsdManager delivers onDiscoveryStarted <when>
@@ -183,10 +185,11 @@ Feature: The AirPlay receiver's runtime, with doubles
     Then <outcome>
 
     Examples:
-      | when                         | outcome                                                                                       |
-      | at 4999 ms                   | a dns_sd connect attempt was made at 4999 ms or later and the log has "advertise ok"         |
-      | never                        | the log has "advertise failed" naming a discovery timeout, and no dns_sd connect was made     |
-      | at 5001 ms                   | the log has "advertise failed" naming a discovery timeout, and no dns_sd connect was made     |
+      | when       | outcome                                                                                                                    |
+      | at 4999 ms | a dns_sd connect attempt was made at 4999 ms and the log has "advertise ok"                                                |
+      | at 5000 ms | the log has a record that is exactly "advertise failed reason=discovery-timeout code=none", and no dns_sd connect was made |
+      | at 5001 ms | the log has a record that is exactly "advertise failed reason=discovery-timeout code=none", and no dns_sd connect was made |
+      | never      | the log has a record that is exactly "advertise failed reason=discovery-timeout code=none", and no dns_sd connect was made |
 
   @offline @boundary @AIR-050 @AT-50 @OD-164
   Scenario: The dns_sd socket is retried every 250 ms, and one that appears at 4,750 ms connects
@@ -197,20 +200,20 @@ Feature: The AirPlay receiver's runtime, with doubles
     And only the attempt at 4750 ms succeeded
     And the log has "mdnsd up" and then "advertise ok"
 
-  @offline @boundary @AIR-050 @AT-50 @OD-164
+  @offline @boundary @AIR-050 @AT-50 @OD-164 @OD-185 @OD-186
   Scenario: A dns_sd socket still missing at the end of the 5,000 ms window fails the advertise
     Given onDiscoveryStarted arrives at 0 ms
     And /dev/socket/mdnsd is missing for the whole run
     When the receiver runs for 8000 ms
-    Then no dns_sd connect attempt was made later than 5000 ms into the connect window
-    And the log has "advertise failed" with reason ENOENT
+    Then dns_sd connect attempts were made only at 0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000, 3250, 3500, 3750, 4000, 4250, 4500, 4750 and 5000 ms of the connect window, 21 attempts in all
+    And the log has a record that is exactly "advertise failed reason=ENOENT code=none"
     And the log has no "mdnsd up"
 
-  @offline @failure @AIR-050 @AIR-069 @AT-50 @OD-150 @OD-164 @OD-167
+  @offline @failure @AIR-050 @AIR-069 @AT-50 @OD-150 @OD-164 @OD-167 @OD-185 @OD-186
   Scenario Outline: Every advertise failure is logged, undone and ends the start, with no retry or fallback
     Given <fault>
     When the receiver runs for 20000 ms
-    Then the log has "advertise failed" with <reason>
+    Then the log has a record that is exactly "advertise failed <reason>"
     And <withdrawn>
     And discovery was stopped with stopServiceDiscovery if discoverServices had returned
     And no accept call was made, and no registration, discoverServices call or dns_sd connect was made after the log record "advertise failed"
@@ -220,18 +223,20 @@ Feature: The AirPlay receiver's runtime, with doubles
     And the process stays alive and the activity is not finished
 
     Examples:
-      | fault                                                                       | reason                                    | withdrawn                                                  |
-      | getSystemService(Context.NSD_SERVICE) returns null                          | the null-manager reason                   | no registration was made                                   |
-      | getSystemService(Context.NSD_SERVICE) throws SecurityException              | the reason SecurityException              | no registration was made                                   |
-      | onStartDiscoveryFailed is delivered with error code 0                       | the discovery-failed reason and code 0    | no registration was made                                   |
-      | onDiscoveryStarted never arrives                                            | the discovery-timeout reason              | no registration was made                                   |
-      | /dev/socket/mdnsd is missing for the whole connect window                   | reason ENOENT                             | no registration was made                                   |
-      | /dev/socket/mdnsd refuses with EACCES for the whole connect window          | reason EACCES                             | no registration was made                                   |
-      | /dev/socket/mdnsd refuses with ECONNREFUSED for the whole connect window    | reason ECONNREFUSED                       | no registration was made                                   |
-      | the _airplay._tcp TXT record cannot be built                                | the TXT-build reason                      | no registration was made                                   |
-      | the _airplay._tcp registration returns dns_sd error code -65540             | the registration reason and code -65540   | no registration is left in place                           |
-      | the _airplay._tcp registration gets a name-conflict reply                   | the name-conflict reason and its code     | no registration is left in place                           |
-      | the _raop._tcp registration returns dns_sd error code -65540                | the registration reason and code -65540   | the _airplay._tcp registration was withdrawn               |
+      | fault                                                                                   | reason                              | withdrawn                                    |
+      | getSystemService(Context.NSD_SERVICE) returns null                                      | reason=null-manager code=none       | no registration was made                     |
+      | getSystemService(Context.NSD_SERVICE) throws SecurityException                          | reason=security-exception code=none | no registration was made                     |
+      | onStartDiscoveryFailed is delivered with error code 0                                   | reason=discovery-failed code=0      | no registration was made                     |
+      | onDiscoveryStarted never arrives                                                        | reason=discovery-timeout code=none  | no registration was made                     |
+      | /dev/socket/mdnsd is missing for the whole connect window                               | reason=ENOENT code=none             | no registration was made                     |
+      | /dev/socket/mdnsd refuses with EACCES for the whole connect window                      | reason=EACCES code=none             | no registration was made                     |
+      | /dev/socket/mdnsd refuses with EPERM for the whole connect window                       | reason=EPERM code=none              | no registration was made                     |
+      | /dev/socket/mdnsd refuses with ECONNREFUSED for the whole connect window                | reason=ECONNREFUSED code=none       | no registration was made                     |
+      | every dns_sd connect throws ETIMEDOUT for the whole connect window                      | reason=unreachable code=none        | no registration was made                     |
+      | the _airplay._tcp TXT record cannot be built                                            | reason=txt-build code=none          | no registration was made                     |
+      | the _airplay._tcp registration returns dns_sd error code -65540                         | reason=register code=-65540         | no registration is left in place             |
+      | the _airplay._tcp registration gets a name-conflict reply with dns_sd error code -65548 | reason=name-conflict code=-65548    | no registration is left in place             |
+      | the _raop._tcp registration returns dns_sd error code -65540                            | reason=register code=-65540         | the _airplay._tcp registration was withdrawn |
 
   @offline @failure @AIR-050 @AT-50 @OD-161 @OD-164
   Scenario: A dns_sd connection that closes after advertise ok is logged only
@@ -281,19 +286,19 @@ Feature: The AirPlay receiver's runtime, with doubles
     And the log has "hevc refused"
     And the session is ended
 
-  @offline @failure @AIR-053 @AT-53
+  @offline @failure @AIR-053 @AT-53 @OD-185
   Scenario Outline: URL, HLS and DRM requests are refused and logged by kind, without the URL
     Given the library double delivers a <kind> request fixture for "http://192.168.0.50:7100/fixture-marker-7c1e.m3u8" at 2000 ms
     When the receiver runs for 3000 ms
     Then the request was refused
-    And the log has a refusal record naming the kind <kind>
+    And the log has a record that is exactly "refused <token>"
     And no log record contains "fixture-marker-7c1e" or "192.168.0.50"
 
     Examples:
-      | kind |
-      | URL  |
-      | HLS  |
-      | DRM  |
+      | kind | token |
+      | URL  | url   |
+      | HLS  | hls   |
+      | DRM  | drm   |
 
   @offline @normal @AIR-054 @AT-54 @OD-153
   Scenario Outline: The receiver has no audio output
@@ -330,6 +335,7 @@ Feature: The AirPlay receiver's runtime, with doubles
     And the Java side is held busy from 1500 ms to 2500 ms
     When the library double calls <callback> with its fixture at 2000 ms
     Then <callback> returned before 2500 ms, without a crash
+    And the Examples' callbacks equal the list produced by the @host unguarded-callback check
 
     Examples:
       | callback                 |
@@ -369,6 +375,7 @@ Feature: The AirPlay receiver's runtime, with doubles
   Scenario: The decoder is created by name only and renders to the activity's own Surface
     When a session starts at 1000 ms
     Then the fake codec factory recorded exactly one call, createByCodecName("OMX.TCC.avcdec")
+    And createByCodecName was not called before video_set_codec_and_size reported the H.264 configuration
     And it recorded no codec-list lookup
     And the fake codec was configured with the receiver activity's own Surface
 
@@ -420,15 +427,15 @@ Feature: The AirPlay receiver's runtime, with doubles
     And the library double saw the connection kept, with no close, from 500 ms to 3000 ms
     And the MirrorSession and VehicleBus doubles recorded zero calls
 
-  @offline @normal @AIR-058 @AT-58
+  @offline @normal @AIR-058 @AT-58 @OD-63
   Scenario: The Park getter is called every 200 ms on a worker thread, one call at a time
     Given each getGearPStatus() call takes 150 ms to reply, except the one started at 400 ms, which takes 350 ms
     When the receiver runs for 1000 ms
-    Then VehicleInfoManager.getGearPStatus() was called only at 0, 200, 400, 800 and 1000 ms
+    Then VehicleInfoManager.getGearPStatus() was called only at 0, 200, 400, 750 and 950 ms
     And every call ran on a thread other than the main thread
     And no call started while another was in flight
 
-  @offline @failure @AIR-058 @AT-58
+  @offline @failure @AIR-058 @AT-58 @OD-185
   Scenario Outline: A failed or late Park getter call gives unavailable, logged with its class
     Given the getGearPStatus() call started at 200 ms <fault>
     When the receiver runs for 1000 ms
@@ -438,7 +445,7 @@ Feature: The AirPlay receiver's runtime, with doubles
 
     Examples:
       | fault                                                          | named                                     |
-      | does not reply within 200 ms                                   | the timeout                               |
+      | does not reply within 200 ms                                   | "java.util.concurrent.TimeoutException"   |
       | throws SecurityException                                       | "java.lang.SecurityException"             |
       | throws android.os.DeadObjectException                          | "android.os.DeadObjectException"          |
       | fails because VehicleInfoManager's class is missing            | "java.lang.NoClassDefFoundError"          |
@@ -499,6 +506,12 @@ Feature: The AirPlay receiver's runtime, with doubles
     Then the registerReceiver call for com.hkmc.intent.action.REVERSE_ON returned before onCreate returned, on the main thread
     And its IntentFilter has only the action com.hkmc.intent.action.REVERSE_ON
 
+  @offline @normal @AIR-060 @AIR-041 @AT-60
+  Scenario: The S2 reverse scenarios pass against the Android REVERSE_ON adapter
+    Given the scenarios selected by the tag expression "@S2 and @AIR-041 and @offline" are bound to the Android REVERSE_ON receiver adapter driven by a fake broadcast source
+    When those scenarios run
+    Then every one of them passes against that adapter
+
   @offline @normal @AIR-061 @AT-61
   Scenario: Notices are toast windows and need no overlay permission
     When the static scan runs
@@ -536,6 +549,13 @@ Feature: The AirPlay receiver's runtime, with doubles
       | state                         |
       | does not exist                |
       | exists but every write throws |
+
+  @offline @normal @AIR-062 @AIR-039 @AT-62
+  Scenario: The S2 rotation scenarios pass against the Android LogFiles adapter
+    Given the scenarios selected by the tag expression "@S2 and @AIR-039 and @offline" are bound to the Android LogFiles adapter over a fake file system rooted at /data/nemesis/logs/airplay-receiver/
+    When those scenarios run
+    Then every one of them passes against that adapter
+    And the fake file system recorded no write outside /data/nemesis/logs/airplay-receiver/
 
   @offline @normal @AIR-063 @AT-63
   Scenario: The parking setting is read from the one config path, and the receiver never writes it
@@ -579,7 +599,7 @@ Feature: The AirPlay receiver's runtime, with doubles
   Scenario: Every marker is written in AIR-071's exact text, and a new app start numbers sessions from 1
     Given a session starts at 1000 ms
     And the library double delivers the allowlisted record "Mirroring initialized successfully" after reporting the accepted connection and before calling video_set_codec_and_size
-    And the session ends at 3000 ms
+    And the library double reports at 3000 ms that the iPhone ended the connection
     When the receiver runs for 4000 ms and then exit() is called
     And the receiver is then started again with the car out of Park, a session starts at 1000 ms of that app start, and it runs for 2000 ms
     Then the first app start's log, with the logger's prefix taken off each record, has these records in this order, each byte for byte:
@@ -590,11 +610,38 @@ Feature: The AirPlay receiver's runtime, with doubles
       | session 1 codec h264 1920x720                                                                                                   |
       | decoder OMX.TCC.avcdec configured                                                                                               |
       | session 1 first frame rendered                                                                                                  |
-      | session 1 end reason=<reason> withheld=0                                                                                        |
-      | parkcast stop reason=<reason>                                                                                                   |
+      | session 1 end reason=iphone disconnected withheld=0                                                                             |
+      | parkcast stop reason=owner exit                                                                                                 |
     And each <field> in those records holds the build's or the library double's value, with no other text
     And the second app start's log has "session 1 connection accepted model=" and "session 1 first frame withheld by gate"
     And the second app start's log has no "session 2"
+
+  @offline @normal @AIR-071 @AT-71 @OD-185 @OD-186
+  Scenario Outline: Each way a session ends is logged with its own reason
+    Given <cause>
+    When the receiver runs for 4000 ms and then exit() is called
+    Then the log has exactly one record that begins "session 1 end "
+    And the log has a record that is exactly "session 1 end reason=<reason> withheld=0"
+
+    Examples:
+      | cause                                                                                                           | reason              |
+      | a session starts at 1000 ms, and the library double reports at 2000 ms that the iPhone ended the connection     | iphone disconnected |
+      | a session starts at 1000 ms, but video_set_codec_and_size reports HEVC with an HEVC codec-configuration fixture | hevc refused        |
+      | the fake codec factory throws java.io.IOException on create, and a session starts at 1000 ms                    | decoder unavailable |
+      | a session starts at 1000 ms, and the fake codec throws MediaCodec.CodecException at 2000 ms                     | decoder error       |
+      | a session starts at 1000 ms and is still open when exit() is called                                             | stop                |
+
+  @offline @normal @AIR-071 @AT-71 @OD-185 @OD-186
+  Scenario Outline: Each way the app stops is logged with its own reason, as the last record
+    Given a session starts at 1000 ms
+    When the receiver runs for 2000 ms and then <stop>
+    Then the last record of the log is exactly "parkcast stop reason=<reason>"
+    And the log has exactly one record that begins "parkcast stop "
+
+    Examples:
+      | stop                                                      | reason     |
+      | exit() is called                                          | owner exit |
+      | the lifecycle double drives onPause, onStop and onDestroy | destroy    |
 
   @offline @normal @AIR-065 @AT-65
   Scenario: The Scheduler is timed by SystemClock.uptimeMillis()
@@ -616,6 +663,13 @@ Feature: The AirPlay receiver's runtime, with doubles
     When the static scan runs
     Then it finds no setter method of com.hkmc.regulation
     And com.hkmc.regulation is used only to receive notifications
+
+  @offline @normal @AIR-066 @AIR-038 @AT-66
+  Scenario: The S2 regulation-state scenarios pass against the Android regulation adapter
+    Given the scenarios selected by the tag expression "@S2 and @AIR-038 and @offline" are bound to the Android regulation adapter backed by a fake com.hkmc.regulation service
+    When those scenarios run
+    Then every one of them passes against that adapter
+    And the fake service recorded no setter call
 
   @offline @normal @AIR-067 @AT-67
   Scenario: The S2_GATE forbidden list, widened to the whole app, finds nothing
@@ -835,6 +889,30 @@ Feature: The AirPlay receiver's runtime, with doubles
       | "line one\nline two"                       |
       | "line one\rline two"                       |
 
+  @offline @boundary @AIR-073 @AT-73 @OD-185
+  Scenario Outline: Header lines and raw key material never reach the log
+    Given a session starts at 500 ms
+    And the library double delivers at 600 ms an allowlisted record, changed so that <change> and otherwise still on the allowlist
+    When the receiver runs for 1000 ms and then exit() is called
+    Then no part of that record was written
+    And the withheld count logged at session end is 1
+
+    Examples:
+      | change                                           |
+      | it starts with "CSeq: 3 "                        |
+      | it starts with "X-Apple-ProtocolVersion: 1 "     |
+      | it holds the byte 0x01                           |
+      | it holds a 32-character run of hex digits        |
+      | it holds a 44-character run of base64 characters |
+
+  @offline @boundary @AIR-073 @AT-73 @OD-185
+  Scenario: A 31-character hex run and a 43-character base64 run are kept
+    Given a session starts at 500 ms
+    And the library double delivers at 600 ms an allowlisted record holding a 31-character run of hex digits, and at 700 ms one holding a 43-character run of base64 characters
+    When the receiver runs for 1000 ms and then exit() is called
+    Then both records are written unchanged
+    And the withheld count logged at session end is 0
+
   @offline @boundary @AIR-079 @AT-79 @OD-151 @OD-171
   Scenario Outline: The CarPlay listener check reads /proc/net/tcp and logs one line
     Given /proc/net/tcp is a fixture <listener>, with the marker "PROC-NET-MARKER" in another line
@@ -850,7 +928,7 @@ Feature: The AirPlay receiver's runtime, with doubles
       | with a local TCP 7000 listener (local port 1B58, state 0A) | carplay listener present  |
       | with no local TCP 7000 listener                            | carplay listener absent   |
 
-  @offline @boundary @AIR-079 @AT-79 @OD-151 @OD-158
+  @offline @boundary @AIR-079 @AT-79 @OD-151 @OD-158 @OD-185
   Scenario Outline: An unreadable or malformed /proc/net/tcp is logged as unknown, and the start goes on
     Given /proc/net/tcp <fault>
     When the receiver runs for 1000 ms
@@ -859,9 +937,9 @@ Feature: The AirPlay receiver's runtime, with doubles
     And no notice add call was made
 
     Examples:
-      | fault                                       | class                         |
-      | throws java.io.IOException when read        | "java.io.IOException"         |
-      | holds a malformed fixture                   | of the parse failure          |
+      | fault                                | class                             |
+      | throws java.io.IOException when read | "java.io.IOException"             |
+      | holds a malformed fixture            | "java.lang.NumberFormatException" |
 
   @offline @normal @AIR-080 @AT-80
   Scenario Outline: The receiver never takes the screen back
