@@ -50,6 +50,8 @@ public final class Receiver {
     private final Cover cover;
     private final RegulationLog regulationLog;
 
+    private StartHook startHook;
+
     private boolean created;
     private boolean resumed;
     private boolean exited;
@@ -74,6 +76,7 @@ public final class Receiver {
         this.log = new GateLog(logs, scheduler);
         this.notices = new Notices(windows, scheduler, displayWidth);
         this.log.setNotices(notices);
+        this.notices.setLog(log);
         this.flag = new ReceiverConfig(config);
         this.poller = new ParkPoller(scheduler, park, log);
         this.gate = new ParkingGate(display, poller, flag, build, log);
@@ -93,6 +96,7 @@ public final class Receiver {
         created = true;
         flag.load();
         boolean on = flag.requirePark();
+        if (startHook != null) startHook.beforeStartRecord(on);
         if (!on) log.record("parking check off");
         gate.start();
         log.record("start check=" + onOff(on) + " prev=unknown as=the startup value gate="
@@ -134,6 +138,36 @@ public final class Receiver {
         notices.exit();
         poller.stop();
         regulationLog.stop();
+    }
+
+    /**
+     * Called by {@link #onCreate} once the flag is read and before the gate's first record, so the S3 runtime
+     * can write its start marker first (AIR-071(a), OD-189).
+     */
+    public interface StartHook {
+        /** @param requirePark the effective {@code require_park} value for this app start */
+        void beforeStartRecord(boolean requirePark);
+    }
+
+    /** Sets the hook {@link #onCreate} calls before its first record. Set before {@code onCreate}. */
+    public void setStartHook(StartHook hook) {
+        this.startHook = hook;
+    }
+
+    /** Records start with the bare uptime in milliseconds instead of {@code t=} (AIR-071(g)). */
+    public void useUptimeLog() {
+        log.useUptimePrefix();
+    }
+
+    /** Writes one record through the receiver's log, with its rotation and logging-failure handling. */
+    public void record(String line) {
+        log.record(line);
+    }
+
+    /** The receiver could not start: show the one start-failure notice for {@code cause} (AIR-069). */
+    public void startFailed(String cause) {
+        if (exited) return;
+        notices.startFailed(cause);
     }
 
     private static String onOff(boolean on) {

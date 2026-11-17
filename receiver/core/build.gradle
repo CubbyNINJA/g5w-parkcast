@@ -1,0 +1,59 @@
+// The receiver's runtime (OD-189): plain Java with no Android imports, compiled for Java 7 like the gate
+// (OD-132). It wires the S2 gate to ports for the native library, NSD, the decoder and the app files; the
+// Android adapters live elsewhere. Its scenarios (the "core" lines of specs/java-features.txt) run with
+// Cucumber-JVM against the doubles under src/test.
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':receiver:gate')
+    testImplementation testFixtures(project(':receiver:gate'))
+    testImplementation platform('io.cucumber:cucumber-bom:7.20.1')
+    testImplementation platform('org.junit:junit-bom:5.11.3')
+    testImplementation 'io.cucumber:cucumber-java'
+    testImplementation 'io.cucumber:cucumber-picocontainer'
+    testImplementation 'io.cucumber:cucumber-junit-platform-engine'
+    testImplementation 'org.junit.platform:junit-platform-suite'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('compileJava') {
+    options.release = 7
+    options.compilerArgs += ['-Xlint:-options']
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('compileTestJava') {
+    options.release = 17
+    options.encoding = 'UTF-8'
+}
+
+def featuresDir = rootProject.file('specs/features')
+// Only the lines marked "core" (OD-189); the gate's runner takes the "gate" lines.
+def javaFeatures = rootProject.file('specs/java-features.txt').readLines('UTF-8')
+        .collect { it.trim() }.findAll { it && !it.startsWith('#') }
+        .collect { it.split(/\s+/) }
+        .each { if (it.length != 2 || !(it[0] in ['gate', 'core'])) throw new GradleException("specs/java-features.txt: bad line '${it.join(' ')}'") }
+        .findAll { it[0] == 'core' }
+        .collect { new File(featuresDir, it[1]) }
+        .each { if (!it.exists()) throw new GradleException("specs/java-features.txt names a missing file: ${it.name}") }
+        .collect { it.absolutePath }.join(',')
+
+test {
+    useJUnitPlatform()
+    // One scenario subset: -Dcucumber.features=<absolute path of a feature file>:<line>:<line>...
+    systemProperty 'cucumber.features', System.getProperty('cucumber.features', javaFeatures)
+    systemProperty 'cucumber.glue', 'parkcast.core.steps'
+    systemProperty 'cucumber.filter.tags', System.getProperty('cucumber.filter.tags', '@S3 and @offline')
+    systemProperty 'cucumber.plugin', 'summary'
+    inputs.dir(featuresDir)
+    testLogging {
+        events 'failed'
+        exceptionFormat 'short'
+    }
+}

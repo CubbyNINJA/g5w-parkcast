@@ -27,6 +27,8 @@ public final class GateLog {
     private final LogFiles files;
     private final Scheduler scheduler;
     private Notices notices;
+    /** Records start with the bare uptime in milliseconds, as AIR-071(g) asks of the S3 receiver's log. */
+    private boolean uptime;
 
     public GateLog(LogFiles files, Scheduler scheduler) {
         this.files = files;
@@ -52,8 +54,17 @@ public final class GateLog {
         this.notices = notices;
     }
 
+    /**
+     * Switches the time prefix from {@code t=<ms>} to the bare uptime in milliseconds (AIR-071(g)). The S2
+     * gate on its own keeps {@code t=}; the S3 runtime turns this on before its first record.
+     */
+    public void useUptimePrefix() {
+        this.uptime = true;
+    }
+
     private byte[] encode(String line) {
-        return ("t=" + scheduler.now() + " " + line + "\n").getBytes(UTF8);
+        String prefix = uptime ? String.valueOf(scheduler.now()) : "t=" + scheduler.now();
+        return (prefix + " " + line + "\n").getBytes(UTF8);
     }
 
     private void write(byte[] b) {

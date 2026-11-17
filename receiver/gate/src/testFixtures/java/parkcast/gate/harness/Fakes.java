@@ -33,6 +33,8 @@ public final class Fakes {
     }
 
     public static final String REG = "REG", LOG = "LOG";
+    /** The S3 start-failure notice (AIR-069(c)). */
+    public static final String START = "START";
 
     // ---------------------------------------------------------------- Park getter
 
@@ -437,6 +439,7 @@ public final class Fakes {
         }
 
         private static String kindOf(String text) {
+            if (text != null && text.startsWith("ParkCast can't start")) return START;
             return text != null && text.toLowerCase().contains("logging") ? LOG : REG;
         }
 

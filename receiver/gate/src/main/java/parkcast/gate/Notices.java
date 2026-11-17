@@ -43,6 +43,9 @@ public final class Notices {
     private final int displayWidth;
     private final Notice registration;
     private final Notice logging;
+    private final StartFailureNotice startFailure = new StartFailureNotice();
+    /** Where a failed start-failure notice add is recorded; absent for the S2 gate on its own. */
+    private GateLog log;
 
     /** Covered from process start until the first focus gain (AIR-041(a)). */
     private boolean covered = true;
@@ -66,12 +69,26 @@ public final class Notices {
         logging.trigger();
     }
 
+    /**
+     * The receiver could not start: show the start-failure notice for {@code cause} (AIR-069(c) to (f)). At
+     * most one per app start; later calls do nothing.
+     */
+    public void startFailed(String cause) {
+        startFailure.trigger(cause);
+    }
+
+    /** Gives the start-failure notice a log for its failed-add record (AIR-061(b)). */
+    public void setLog(GateLog log) {
+        this.log = log;
+    }
+
     /** The receiver became covered: hold attempts and remove windows on screen at once (AIR-041(b), (c)). */
     public void coverStart() {
         if (exited || covered) return;
         covered = true;
         registration.onCoverStart();
         logging.onCoverStart();
+        startFailure.onCoverStart();
     }
 
     /** The receiver stopped counting as covered: finish cover removals, then make held attempts. */
@@ -82,6 +99,7 @@ public final class Notices {
         logging.onUncover();
         registration.makeHeld();
         logging.makeHeld();
+        startFailure.makeHeld();
     }
 
     /** Receiver exit: one removal call per window on screen; held attempts and retries are dropped. */
@@ -90,6 +108,110 @@ public final class Notices {
         exited = true;
         registration.onExit();
         logging.onExit();
+        startFailure.onExit();
+    }
+
+    /** Opens a placed registration-failure toast's gravity and x to the bottom centre when it is not at the bottom. */
+    private WindowSpec placedSpec(Placement p) {
+        int gravity = p.gravity;
+        int x = p.x;
+        if ((gravity & VERTICAL_GRAVITY_MASK) != WindowSpec.GRAVITY_BOTTOM) {
+            gravity = WindowSpec.GRAVITY_BOTTOM | WindowSpec.GRAVITY_CENTER_HORIZONTAL;
+            x = 0;
+        }
+        return new WindowSpec(WindowSpec.TYPE_TOAST, WindowSpec.FLAG_NOT_FOCUSABLE | WindowSpec.FLAG_NOT_TOUCHABLE,
+                gravity, x, p.y);
+    }
+
+    /**
+     * The start-failure notice (AIR-069(c) to (f), AIR-061(b), (c)): one per app start, held while covered and
+     * added at uncover, on screen for 5,000 ms. A cover start removes it, and it is not shown again in that app
+     * start. A failed add is logged once and not retried. Exit drops a held notice and removes a shown one.
+     */
+    private final class StartFailureNotice {
+        private boolean triggered;
+        private String text;
+        private boolean held;
+        /** Shown and removed by a cover start, or its one add failed: no further add in this app start. */
+        private boolean done;
+        private Win win;
+        private Scheduler.Task removalTask;
+
+        void trigger(String cause) {
+            if (exited || triggered) return;
+            triggered = true;
+            text = "ParkCast can't start: " + cause + ". Exit and try again.";
+            if (covered) {
+                held = true;
+                return;
+            }
+            attempt();
+        }
+
+        void makeHeld() {
+            if (!held) return;
+            held = false;
+            if (!done) attempt();
+        }
+
+        private void attempt() {
+            done = true;
+            Win added;
+            try {
+                NoticeView view = windows.create(text);
+                NoticeView toast = windows.create(REGISTRATION_TEXT);
+                Placement p = windows.placementFrom(toast);
+                if (p == null) {
+                    addFailed("placement missing");
+                    return;
+                }
+                added = windows.add(view, placedSpec(p));
+            } catch (RuntimeException e) {
+                addFailed(e.getClass().getName());
+                return;
+            }
+            if (added == null) return;
+            win = added;
+            removalTask = scheduler.at(scheduler.now() + ON_SCREEN_MS, new Runnable() {
+                @Override
+                public void run() {
+                    removalTask = null;
+                    remove();
+                }
+            });
+        }
+
+        private void addFailed(String why) {
+            if (log != null) log.record("start-failure notice add failed " + why);
+        }
+
+        private void remove() {
+            if (removalTask != null) {
+                removalTask.cancel();
+                removalTask = null;
+            }
+            if (win == null) return;
+            Win w = win;
+            win = null;
+            try {
+                windows.remove(w);
+            } catch (RuntimeException e) {
+                // One removal call; the notice is not shown again in this app start either way.
+            }
+        }
+
+        void onCoverStart() {
+            held = false;
+            if (win != null) {
+                done = true;
+                remove();
+            }
+        }
+
+        void onExit() {
+            held = false;
+            remove();
+        }
     }
 
     private Scheduler.Task after(long delay, Runnable r) {

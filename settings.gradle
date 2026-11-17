@@ -2,3 +2,4 @@
 // S1 and the shared tag/trace checks run under pytest; see README.md.
 rootProject.name = 'g5w-parkcast'
 include 'receiver:gate'
+include 'receiver:core'

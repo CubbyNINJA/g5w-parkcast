@@ -379,6 +379,17 @@ Feature: The AirPlay receiver's runtime, with doubles
     And no notice add call was made
     And the process stays alive and the activity is not finished
 
+  @offline @failure @AIR-055 @AIR-069 @AT-55 @AT-69 @OD-175
+  Scenario: A failed stdio redirect after a missing hotspot address still gives the hotspot notice
+    Given the interface double reports no wlan0
+    And pointing descriptor 1 at /dev/null fails
+    When the receiver runs for 10000 ms
+    Then the log has "hotspot address missing"
+    And the log has "stdio redirect failed"
+    And the fake native library recorded no call
+    And exactly one start-failure notice add call was made, at exactly 0 ms, for "hotspot address missing"
+    And the process stays alive and the activity is not finished
+
   @offline @normal @AIR-056 @AT-56 @OD-150
   Scenario: The decoder is created by name only and renders to the activity's own Surface
     When a session starts at 1000 ms
