@@ -67,6 +67,8 @@ public final class ScopeSteps {
         // AIR-061(a): notices are toast windows; no overlay permission or system-alert window type.
         forbid("SYSTEM_ALERT_WINDOW", "SYSTEM_ALERT_WINDOW");
         forbid("TYPE_SYSTEM_ALERT", "TYPE_SYSTEM_ALERT");
+        // AIR-066: the stock regulation state is only received; a file naming it calls no setter.
+        forbid("setter method of com.hkmc.regulation", "com[./]hkmc[./]regulation", "\\bset[A-Z]\\w*");
     }
 
     private static void forbid(String phrase, String... all) {
@@ -206,5 +208,11 @@ public final class ScopeSteps {
             }
         }
         return -1;
+    }
+
+    /** The files the static scan read, for other scan steps; fails when no step ran the scan. */
+    List<Scanned> scanned() {
+        if (files.isEmpty()) throw new IllegalStateException("no step ran the static scan");
+        return files;
     }
 }

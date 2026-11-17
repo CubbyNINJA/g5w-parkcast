@@ -134,4 +134,9 @@ public final class ReceiverRuntime {
     public void record(String line) {
         gate.record(line);
     }
+
+    /** A decoded frame, delivered on the event thread (AIR-062). */
+    public void onFrame(parkcast.gate.port.Frame f) {
+        gate.onFrame(f);
+    }
 }
