@@ -129,4 +129,9 @@ public final class ReceiverRuntime {
         }
         return p == null ? UNKNOWN_PRODUCT : p;
     }
+
+    /** Writes one record to the receiver's log, for the platform adapters (AIR-058). */
+    public void record(String line) {
+        gate.record(line);
+    }
 }
