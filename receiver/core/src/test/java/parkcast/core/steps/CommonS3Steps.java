@@ -10,6 +10,7 @@ import io.cucumber.java.en.When;
 import java.util.List;
 import parkcast.core.doubles.Trace;
 import parkcast.gate.harness.Fakes;
+import parkcast.gate.harness.VirtualScheduler;
 
 /** Steps every S3 runtime scenario shares: running the receiver, the log, video blocking and the process. */
 public final class CommonS3Steps {
@@ -155,5 +156,23 @@ public final class CommonS3Steps {
     private static int indexStarting(List<String> b, String s, int from) {
         for (int i = from; i < b.size(); i++) if (b.get(i).startsWith(s)) return i;
         return -1;
+    }
+
+    @Given("a session starts at {int} ms")
+    public void sessionAt(int t) {
+        w.sessionsAt.add((long) t);
+    }
+
+    @When("the receiver runs for {int} ms and then exit\\() is called")
+    public void runsThenExit(int ms) {
+        w.runFor(ms);
+        w.runtime.exit();
+    }
+
+    /** Park is gear 1 in the gate's park double; leaving Park sets it to 0 (as the gate's own step does). */
+    @Given("the car leaves Park at {int} ms and returns to Park at {int} ms")
+    public void leavesAndReturns(int out, int back) {
+        w.scheduler.script(out, VirtualScheduler.BEFORE, () -> w.g.park.gear = 0);
+        w.scheduler.script(back, VirtualScheduler.BEFORE, () -> w.g.park.gear = 1);
     }
 }

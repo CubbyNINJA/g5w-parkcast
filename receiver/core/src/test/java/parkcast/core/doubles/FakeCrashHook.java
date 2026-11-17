@@ -6,6 +6,8 @@ import parkcast.core.port.CrashHook;
 public final class FakeCrashHook implements CrashHook {
     private final Trace trace;
     public CrashSink sink;
+    /** Set once the modelled process has ended after a crash. */
+    public boolean ended;
 
     public FakeCrashHook(Trace trace) {
         this.trace = trace;
@@ -21,5 +23,7 @@ public final class FakeCrashHook implements CrashHook {
     public void crash(Throwable t) {
         trace.add("crash", "uncaught", t.getClass().getName());
         if (sink != null) sink.crashed(t);
+        trace.add("crash", "process end", "");
+        ended = true;
     }
 }
