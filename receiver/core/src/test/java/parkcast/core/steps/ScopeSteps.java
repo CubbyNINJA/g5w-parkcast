@@ -9,9 +9,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -40,6 +43,8 @@ public final class ScopeSteps {
 
     /** What each "finds no" phrase means, as name patterns; a file matching every pattern of one entry is a hit. */
     private static final Map<String, List<Pattern[]>> FORBIDDEN = new LinkedHashMap<>();
+    /** Phrases whose rules apply to AndroidManifest.xml only. */
+    private static final Set<String> MANIFEST_ONLY = new HashSet<>();
 
     static {
         // AIR-058: the BCM's gear-status method is getGearStatusInfo (docs/evidence/GEAR_PROBE_FINDINGS.md).
@@ -49,6 +54,19 @@ public final class ScopeSteps {
         forbid("Build.PRODUCT", "\\bBuild\\s*\\.\\s*PRODUCT\\b");
         forbid("Build.PRODUCT", "android/os/Build\\b", "\\bPRODUCT\\b");
         forbid("Build.PRODUCT", "\\bandroid\\.os\\.Build\\s*\\.\\s*PRODUCT\\b");
+        // AIR-059(b): no system-off responder and no micom power service (transaction 14 is its method).
+        forbid("registerSystemOffResponder", "registerSystemOffResponder");
+        forbid("micom power transaction 14", "com[./]hkmc[./]micom[./]power");
+        forbid("micom power transaction 14", "\\bMicomPower\\w*");
+        // AIR-060: REVERSE_ON is registered in code, never by a manifest receiver; nothing reads reverse-off state.
+        forbid("com.hkmc.intent.action.REVERSE_ON receiver in the manifest",
+                "(?s)<receiver\\b(?:(?!</receiver>).)*com\\.hkmc\\.intent\\.action\\.REVERSE_ON");
+        MANIFEST_ONLY.add("com.hkmc.intent.action.REVERSE_ON receiver in the manifest");
+        forbid("REVERSE_OFF", "REVERSE_OFF");
+        forbid("isRearViewOn", "isRearViewOn");
+        // AIR-061(a): notices are toast windows; no overlay permission or system-alert window type.
+        forbid("SYSTEM_ALERT_WINDOW", "SYSTEM_ALERT_WINDOW");
+        forbid("TYPE_SYSTEM_ALERT", "TYPE_SYSTEM_ALERT");
     }
 
     private static void forbid(String phrase, String... all) {
@@ -83,9 +101,10 @@ public final class ScopeSteps {
         for (String phrase : phrases.split(" and no |, | or no | or ")) {
             List<Pattern[]> rules = FORBIDDEN.get(phrase.trim());
             if (rules == null) throw new IllegalArgumentException("the static scan has no rule for \"" + phrase + "\"");
+            boolean manifestOnly = MANIFEST_ONLY.contains(phrase.trim());
             for (Scanned s : files)
                 for (Pattern[] rule : rules)
-                    if (matchesAll(s.text, rule)) hits.add(phrase.trim() + " in " + s.path);
+                    if ((s.manifest || !manifestOnly) && matchesAll(s.text, rule)) hits.add(phrase.trim() + " in " + s.path);
         }
         if (!hits.isEmpty()) throw new AssertionError("forbidden references: " + hits);
     }
@@ -111,6 +130,7 @@ public final class ScopeSteps {
                 throw new UncheckedIOException(e);
             }
             if (p.toString().endsWith(".java")) text = stripComments(text);
+            if (p.toString().endsWith(".xml")) text = text.replaceAll("(?s)<!--.*?-->", " ");
             files.add(new Scanned(p, text));
         }
     }
@@ -139,5 +159,52 @@ public final class ScopeSteps {
             }
         }
         return out.toString();
+    }
+
+    private static final Pattern MAKE_TEXT = Pattern.compile("\\bToast\\s*\\.\\s*makeText\\s*\\(");
+    private static final Pattern GET_VIEW = Pattern.compile("\\s*\\.\\s*getView\\s*\\(\\s*\\)");
+    private static final Pattern SHOW_CALL = Pattern.compile("\\.\\s*show\\s*\\(");
+    private static final Pattern SHOW_NAME = Pattern.compile("(?<![A-Za-z0-9_$])show(?![A-Za-z0-9_$])");
+
+    /** AIR-061(a): every Toast.makeText(...) is followed by .getView(); no Toast is ever shown with show(). */
+    @Then("^it finds Toast\\.makeText used only with getView\\(\\), never with show\\(\\)$")
+    public void toastViewsOnly() {
+        if (files.isEmpty()) throw new IllegalStateException("no step ran the static scan");
+        List<String> bad = new ArrayList<>();
+        int uses = 0;
+        for (Scanned s : files) {
+            if (s.path.toString().endsWith(".java")) {
+                Matcher m = MAKE_TEXT.matcher(s.text);
+                while (m.find()) {
+                    uses++;
+                    int close = closingParen(s.text, m.end());
+                    if (close < 0 || !GET_VIEW.matcher(s.text).region(close + 1, s.text.length()).lookingAt())
+                        bad.add("Toast.makeText without getView() in " + s.path);
+                }
+                if (s.text.contains("Toast") && SHOW_CALL.matcher(s.text).find()) bad.add("show() in " + s.path);
+            } else if (s.classFile && s.text.contains("android/widget/Toast") && SHOW_NAME.matcher(s.text).find()) {
+                bad.add("show in " + s.path);
+            }
+        }
+        if (uses == 0) throw new AssertionError("the static scan found no Toast.makeText");
+        if (!bad.isEmpty()) throw new AssertionError("toasts not used as views only: " + bad);
+    }
+
+    /** The index of the ')' closing a '(' just before {@code from}, or -1; literals are skipped. */
+    private static int closingParen(String s, int from) {
+        int depth = 1;
+        for (int i = from; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\'') {
+                int j = i + 1;
+                while (j < s.length() && s.charAt(j) != c) j += s.charAt(j) == '\\' ? 2 : 1;
+                i = j;
+            } else if (c == '(') {
+                depth++;
+            } else if (c == ')' && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
     }
 }
