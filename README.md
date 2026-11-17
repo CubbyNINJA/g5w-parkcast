@@ -47,7 +47,7 @@ then tests, then code. See [CONTRIBUTING.md](CONTRIBUTING.md).
 | `docs/spec/REQUIREMENTS.md` | Requirements (`AIR-nnn`) and acceptance tests (`AT-nn`) |
 | `docs/spec/reviews/` | Requirement drafts and coverage reviews, saved verbatim |
 | `docs/spec/TRACEABILITY.md` | Generated: which scenarios cover which requirements |
-| `docs/design/` | How the code is built: `S2_GATE.md` is the gate's ports, components and test harness |
+| `docs/design/` | How the code is built: `S2_GATE.md` covers the gate's ports, components and test harness; `S3_RECEIVER.md` covers the on-unit receiver's modules, staged native start, build and harness |
 | `docs/evidence/` | Facts from the head unit and PC tests that the specs rely on, redacted |
 | `specs/features/` | Gherkin scenarios; tag rules in `specs/README.md` |
 | `tests/` | pytest-bdd bindings and step definitions for S1, plus the tag and traceability checks |
