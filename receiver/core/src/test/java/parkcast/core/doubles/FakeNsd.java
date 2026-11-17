@@ -67,6 +67,7 @@ public final class FakeNsd implements NsdWake {
 
             @Override
             public void stop(Listener l) {
+                if (throwOnStop) throw new IllegalStateException(trace.add("nsd", "stopThrew", "").toString());
                 trace.add("nsd", "stop", "");
             }
         };
@@ -82,4 +83,6 @@ public final class FakeNsd implements NsdWake {
      */
     public String foundName;
     public long foundAt, lostAt;
+    /** {@code stopServiceDiscovery} throws java.lang.IllegalStateException. */
+    public boolean throwOnStop;
 }

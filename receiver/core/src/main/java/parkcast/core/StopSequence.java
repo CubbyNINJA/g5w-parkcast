@@ -1,7 +1,9 @@
 package parkcast.core;
 
+import parkcast.core.port.CoverView;
 import parkcast.core.port.NativeLibrary;
 import parkcast.gate.Receiver;
+import parkcast.gate.port.Display;
 
 /**
  * The stop order (docs/design/S3_RECEIVER.md, AIR-071(c)): block video and the gate's exit, stop(ACCEPT),
@@ -19,11 +21,15 @@ final class StopSequence {
     private final DecoderControl decoder;
     private final NativeLibrary nativeLib;
     private final RuntimeLog log;
+    private final Display display;
+    private final CoverView cover;
 
     private boolean ran;
 
     StopSequence(Receiver gate, StartSequence start, Advertiser advertiser, DecoderControl decoder,
-            NativeLibrary nativeLib, RuntimeLog log) {
+            NativeLibrary nativeLib, RuntimeLog log, Display display, CoverView cover) {
+        this.display = display;
+        this.cover = cover;
         this.gate = gate;
         this.start = start;
         this.advertiser = advertiser;
@@ -35,14 +41,25 @@ final class StopSequence {
     void run(String reason) {
         if (ran) return;
         ran = true;
-        // TODO(phase B: black cover) put the black cover up before the gate exit (AIR-071(c)).
+        // Block video (AIR-070(a) step 1): the black cover up, the surface cleared, then the gate's exit, which
+        // drops a held start-failure notice. Each part runs even if an earlier one threw.
+        try {
+            cover.black(true);
+        } catch (RuntimeException e) {
+            failed(BLOCK_VIDEO, e);
+        }
+        try {
+            display.clear();
+        } catch (RuntimeException e) {
+            failed(BLOCK_VIDEO, e);
+        }
         decoder.stop();
         start.stop();
         advertiser.cancel();
         try {
             gate.exit();
         } catch (RuntimeException e) {
-            failed("gate exit", e);
+            failed(BLOCK_VIDEO, e);
         }
         boolean nativeStarted = start.nativeStarted();
         if (nativeStarted) stopPhase(NativeLibrary.Phase.ACCEPT);
@@ -51,12 +68,12 @@ final class StopSequence {
         try {
             advertiser.stopDiscovery();
         } catch (RuntimeException e) {
-            failed("nsd stop", e);
+            failed("stopServiceDiscovery", e);
         }
         try {
             decoder.releaseCodec();
         } catch (RuntimeException e) {
-            failed("codec release", e);
+            failed("release the decoder", e);
         }
         if (nativeStarted) stopPhase(NativeLibrary.Phase.PORTS);
         log.record("parkcast stop reason=" + reason);
@@ -66,7 +83,23 @@ final class StopSequence {
         try {
             nativeLib.stop(phase);
         } catch (RuntimeException e) {
-            failed("stop " + phase.name(), e);
+            failed(stepName(phase), e);
+        }
+    }
+
+    /** The step names a failed-step record uses: file 13's own names for the stop steps (AIR-070(b)). */
+    static final String BLOCK_VIDEO = "block video";
+
+    private static String stepName(NativeLibrary.Phase phase) {
+        switch (phase) {
+            case ACCEPT:
+                return "stop accepting connections";
+            case SESSION:
+                return "end the session";
+            case REGISTRATIONS:
+                return "withdraw the mDNS registrations";
+            default:
+                return "close all five ports";
         }
     }
 

@@ -68,7 +68,7 @@ public final class ReceiverRuntime {
         DecoderControl decoder = new DecoderControl(codecs, nativeLib, log);
         Advertiser advertiser = new Advertiser(scheduler, nsd, nativeLib, log);
         this.start = new StartSequence(new HotspotCheck(ifaces), files, nativeLib, advertiser, decoder, log);
-        this.stop = new StopSequence(gate, start, advertiser, decoder, nativeLib, log);
+        this.stop = new StopSequence(gate, start, advertiser, decoder, nativeLib, log, display, cover);
         gate.useUptimeLog();
         gate.setStartHook(new Receiver.StartHook() {
             @Override
@@ -111,7 +111,10 @@ public final class ReceiverRuntime {
         stop.run(StopSequence.OWNER_EXIT);
     }
 
-    // TODO(phase B: destroy) onDestroy without an owner exit runs the stop steps with reason=destroy.
+    /** onDestroy without an owner exit runs the stop steps with reason=destroy; after exit() it does nothing. */
+    public void onDestroy() {
+        stop.run(StopSequence.DESTROY);
+    }
 
     private String marker(boolean requirePark) {
         return "parkcast start app=" + version + " commit=" + commit + " uxplay=" + uxplay + " product="

@@ -128,6 +128,7 @@ public final class FakeNativeLibrary implements NativeLibrary {
 
     @Override
     public void stop(Phase p) {
+        if (stopThrows.contains(p)) throw new IllegalStateException(trace.add("native", "stopThrew", p.name()).toString());
         trace.add("native", "stop", p.name());
         if (p == Phase.ACCEPT) accepting = false;
         if (p == Phase.REGISTRATIONS) {
@@ -207,4 +208,7 @@ public final class FakeNativeLibrary implements NativeLibrary {
         registered.clear();
         if (events != null) events.advertiseLost(generation);
     }
+
+    /** Stop phases whose call throws java.lang.IllegalStateException before doing anything. */
+    public final Set<Phase> stopThrows = new HashSet<>();
 }
