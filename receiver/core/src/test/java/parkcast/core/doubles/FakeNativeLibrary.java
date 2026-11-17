@@ -122,6 +122,8 @@ public final class FakeNativeLibrary implements NativeLibrary {
         generation++;
         trace.add("native", "session", "gen=" + generation);
         events.sessionStarted(generation);
+        events.connectionAccepted(generation, model);
+        if (afterAccept != null) deliverLog(afterAccept);
         events.codecConfig(generation, codec, w, h);
     }
 
@@ -151,4 +153,9 @@ public final class FakeNativeLibrary implements NativeLibrary {
         trace.add("native", "session end", "gen=" + generation);
         events.sessionEnded(generation);
     }
+
+    /** The model identifier the double reports with an accepted connection (synthetic). */
+    public String model = "iPhone15,2";
+    /** A record delivered after the accepted connection and before video_set_codec_and_size; null for none. */
+    public String afterAccept;
 }

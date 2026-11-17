@@ -16,4 +16,7 @@ public interface NativeEvents {
 
     /** One native log record, before AIR-073's filter. */
     void log(int generation, String record);
+
+    /** UxPlay accepted the iPhone's connection; {@code model} is its model identifier, never its name. */
+    void connectionAccepted(int generation, String model);
 }

@@ -34,6 +34,7 @@ final class SessionLog {
     void started() {
         number++;
         open = true;
+        firstFrame = false;
     }
 
     /** One record from the library's log callback. */
@@ -74,5 +75,32 @@ final class SessionLog {
 
     int number() {
         return number;
+    }
+
+    private static final java.util.regex.Pattern MODEL = java.util.regex.Pattern.compile("[A-Za-z0-9,.]{1,32}");
+    private boolean firstFrame;
+
+    /** AIR-071(b): the accepted connection, naming the model only (AIR-073(f)); anything else is "unknown". */
+    void accepted(String model) {
+        String m = model != null && MODEL.matcher(model).matches() ? model : "unknown";
+        log.record("session " + number + " connection accepted model=" + m);
+    }
+
+    /** AIR-071(b): the stream's codec and size, from video_set_codec_and_size. */
+    void codec(String name, int width, int height) {
+        String c = "h264".equals(name) || "h265".equals(name) ? name : "unknown";
+        log.record("session " + number + " codec " + c + " " + width + "x" + height);
+    }
+
+    /** AIR-071(b): the decoder was configured; for the frame pipeline to call. */
+    void decoderConfigured() {
+        log.record("decoder " + DecoderControl.DECODER + " configured");
+    }
+
+    /** AIR-071(b): the session's first frame, rendered or withheld by the gate; written once per session. */
+    void firstFrame(boolean rendered) {
+        if (!open || firstFrame) return;
+        firstFrame = true;
+        log.record("session " + number + (rendered ? " first frame rendered" : " first frame withheld by gate"));
     }
 }

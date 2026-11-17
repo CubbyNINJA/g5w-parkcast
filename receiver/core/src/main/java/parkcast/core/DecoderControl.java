@@ -36,12 +36,19 @@ final class DecoderControl implements NativeEvents {
 
     @Override
     public void codecConfig(int generation, String codecName, int width, int height) {
+        if (stopped) return;
+        if (sessions != null) sessions.codec(codecName, width, height);
+        if ("h265".equals(codecName)) {
+            refuseHevc();
+            return;
+        }
         if (stopped || failed || codec != null) return;
         try {
             codec = codecs.create(DECODER);
         } catch (Exception e) {
             failed = true;
             log.record(UNAVAILABLE + " " + e.getClass().getName());
+            if (sessions != null) sessions.end(UNAVAILABLE);
             nativeLib.stop(NativeLibrary.Phase.SESSION);
             log.startFailed(UNAVAILABLE);
             return;
@@ -94,4 +101,19 @@ final class DecoderControl implements NativeEvents {
     void useSessionLog(SessionLog s) {
         sessions = s;
     }
+
+    @Override
+    public void connectionAccepted(int generation, String model) {
+        if (stopped) return;
+        if (sessions != null) sessions.accepted(model);
+    }
+
+    /** AIR-052(b): an HEVC stream never reaches the decoder; the session ends. */
+    private void refuseHevc() {
+        log.record(HEVC_REFUSED);
+        if (sessions != null) sessions.end(HEVC_REFUSED);
+        nativeLib.stop(NativeLibrary.Phase.SESSION);
+    }
+
+    static final String HEVC_REFUSED = "hevc refused";
 }

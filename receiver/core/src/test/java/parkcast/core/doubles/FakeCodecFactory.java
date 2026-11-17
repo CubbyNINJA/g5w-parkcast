@@ -25,6 +25,10 @@ public final class FakeCodecFactory implements CodecFactory {
 
     @Override
     public Codec create(String name) throws Exception {
+        if (createError != null) {
+            trace.add("codec", "create", name + " threw " + createError.getClass().getName());
+            throw createError;
+        }
         if (throwOnCreate) {
             trace.add("codec", "create", name + " threw java.lang.IllegalArgumentException");
             throw new IllegalArgumentException("synthetic codec failure");
@@ -73,4 +77,7 @@ public final class FakeCodecFactory implements CodecFactory {
             trace.add("codec", "release", "");
         }
     }
+
+    /** When set, create throws this (file 13 line 639: java.io.IOException). */
+    public Exception createError;
 }

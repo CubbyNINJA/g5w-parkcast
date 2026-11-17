@@ -116,7 +116,16 @@ public final class ReceiverRuntime {
         stop.run(StopSequence.OWNER_EXIT);
     }
 
-    // TODO(phase B: destroy) onDestroy without an owner exit runs the stop steps with reason=destroy.
+    public void onPause() {
+    }
+
+    public void onStop() {
+    }
+
+    /** The system destroys the activity: the stop steps run once, with reason=destroy, unless exit ran them. */
+    public void onDestroy() {
+        stop.run(StopSequence.DESTROY);
+    }
 
     private String marker(boolean requirePark) {
         return "parkcast start app=" + version + " commit=" + commit + " uxplay=" + uxplay + " product="
