@@ -24,3 +24,5 @@ local.properties
 *.jks
 *.keystore
 receiver/native/.cache/
+# CMake configuration from the Android build
+receiver/app/.cxx/

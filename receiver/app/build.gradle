@@ -169,3 +169,24 @@ dependencies {
 
 tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn 'checkNdk' }
 tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn 'checkSigningInputs' }
+
+// Native prep (design "Native build", OD-189): fetch, verify and patch the pinned sources before CMake
+// configures, so one ./gradlew invocation on a clean clone yields the signed APK (AIR-046(b)). Python 3 is a
+// prerequisite: -Pparkcast.python=<exe>, else this repo's .venv, else "python" on PATH.
+def venvPython = rootProject.file('.venv/Scripts/python.exe')
+def prepPython = providers.gradleProperty('parkcast.python')
+        .orElse(venvPython.isFile() ? venvPython.absolutePath : 'python').get()
+tasks.register('nativePrep', Exec) {
+    description = 'Fetches, checks and patches OpenSSL, libplist and UxPlay for libparkcast (native_prep.py).'
+    workingDir rootProject.file('tools')
+    commandLine prepPython, '-m', 'airplay_s3.native_prep',
+            '--lock', rootProject.file('receiver/native/deps.lock').absolutePath,
+            '--cache', rootProject.file('receiver/native/.cache').absolutePath,
+            '--repo', rootProject.projectDir.absolutePath
+    inputs.file rootProject.file('receiver/native/deps.lock')
+    inputs.dir rootProject.file('receiver/native/patches')
+    inputs.file rootProject.file('receiver/native/unguarded-callbacks.txt')
+    outputs.file rootProject.file('receiver/native/.cache/prep.stamp')
+    onlyIf { buildNative }
+}
+tasks.matching { it.name.startsWith('configureCMake') }.configureEach { dependsOn 'nativePrep' }
