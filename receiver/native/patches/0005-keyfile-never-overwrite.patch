@@ -1,0 +1,174 @@
+diff --git a/lib/crypto.c b/lib/crypto.c
+--- a/lib/crypto.c
++++ b/lib/crypto.c
+@@ -32,6 +32,10 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdbool.h>
++#include <stdio.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <unistd.h>
+ 
+ #include "utils.h"
+ 
+@@ -361,17 +365,21 @@ ed25519_key_t *ed25519_key_generate(const char *device_id, const char *keyfile,
+     assert(key);
+    
+     if (use_keyfile) {
++        /* ParkCast: a keyfile that is there but unreadable or unparsable is an error, never a reason to
++         * overwrite it (upstream fell through to fopen(keyfile, "w")). Only a missing file gets a new key. */
+         file = fopen(keyfile, "r");
+         if (file) {
+-            bp = BIO_new_fp(file, BIO_NOCLOSE);
+             key->pkey = PEM_read_PrivateKey(file, NULL, NULL, NULL);
+-            BIO_free(bp);
+             fclose(file);
+-            if (!key->pkey) {
+-                new_pk = true;
++            if (!key->pkey || EVP_PKEY_id(key->pkey) != EVP_PKEY_ED25519) {
++                *result = ED25519_KEY_ERR_PARSE;
++                goto fail;
+             }
+-        } else {
++        } else if (errno == ENOENT) {
+             new_pk = true;
++        } else {
++            *result = ED25519_KEY_ERR_READ;
++            goto fail;
+         }
+     } else {
+         /* generate (insecure) persistent keypair using device_id */
+@@ -386,29 +394,45 @@ ed25519_key_t *ed25519_key_generate(const char *device_id, const char *keyfile,
+     }
+ 
+     if (new_pk) {
++        /* ParkCast: errors are returned, not handle_error()'d (that calls exit() in the app process) */
+         pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL);
+-        if (!pctx) {
+-            handle_error(__func__);
+-        }
+-        if (!EVP_PKEY_keygen_init(pctx)) {
+-            handle_error(__func__);
+-        }
+-        if (!EVP_PKEY_keygen(pctx, &key->pkey)) {
+-            handle_error(__func__);
++        if (!pctx || EVP_PKEY_keygen_init(pctx) <= 0 || EVP_PKEY_keygen(pctx, &key->pkey) <= 0) {
++            EVP_PKEY_CTX_free(pctx);
++            *result = ED25519_KEY_ERR_GENERATE;
++            goto fail;
+         }
+         EVP_PKEY_CTX_free(pctx);
+         if (use_keyfile) {
+-            file = fopen(keyfile, "w");
+-            if (file) {
+-                bp = BIO_new_fp(file, BIO_NOCLOSE);
+-                PEM_write_bio_PrivateKey(bp, key->pkey, NULL, NULL, 0, NULL, NULL);
+-                BIO_free(bp);
+-                fclose(file);
+-                *result = 1;
++            /* create once, owner-only; O_EXCL so a file that appeared meanwhile is never truncated */
++            int fd = open(keyfile, O_WRONLY | O_CREAT | O_EXCL, 0600);
++            if (fd < 0) {
++                *result = ED25519_KEY_ERR_CREATE;
++                goto fail;
++            }
++            bp = BIO_new_fd(fd, BIO_NOCLOSE);
++            int ok = bp && PEM_write_bio_PrivateKey(bp, key->pkey, NULL, NULL, 0, NULL, NULL) == 1
++                     && BIO_flush(bp) == 1;
++            BIO_free(bp);
++            if (fsync(fd) != 0) {
++                ok = 0;
+             }
++            if (close(fd) != 0) {
++                ok = 0;
++            }
++            if (!ok) {
++                unlink(keyfile);
++                *result = ED25519_KEY_ERR_WRITE;
++                goto fail;
++            }
++            *result = 1;
+         }
+     }
+     return key;
++
++fail:
++    EVP_PKEY_free(key->pkey);
++    free(key);
++    return NULL;
+ }
+ 
+ ed25519_key_t *ed25519_key_from_raw(const unsigned char data[ED25519_KEY_SIZE]) {
+diff --git a/lib/crypto.h b/lib/crypto.h
+--- a/lib/crypto.h
++++ b/lib/crypto.h
+@@ -83,6 +83,14 @@ int gcm_decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *pl
+ 
+ typedef struct ed25519_key_s ed25519_key_t;
+ 
++/* ParkCast (KEYCHECK stage, AIR-048): with a keyfile, an existing file is only ever read, never rewritten;
++ * a missing file is created once (O_EXCL, mode 0600). On failure the result is NULL and *result is one of
++ * these codes (raop.h repeats them as RAOP_KEY_ERR_*). *result is 1 when a new key was stored, else 0. */
++#define ED25519_KEY_ERR_READ      -2   /* the keyfile exists but cannot be opened for reading */
++#define ED25519_KEY_ERR_PARSE     -3   /* the keyfile holds no Ed25519 private key in PEM */
++#define ED25519_KEY_ERR_CREATE    -4   /* the keyfile is missing and cannot be created */
++#define ED25519_KEY_ERR_WRITE     -5   /* the new keyfile could not be written; it is removed again */
++#define ED25519_KEY_ERR_GENERATE  -6   /* key generation failed */
+ ed25519_key_t *ed25519_key_generate(const char *device_id, const char * keyfile, int * result);
+ ed25519_key_t *ed25519_key_from_raw(const unsigned char data[ED25519_KEY_SIZE]);
+ void ed25519_key_get_raw(unsigned char data[ED25519_KEY_SIZE], const ed25519_key_t *key);
+diff --git a/lib/pairing.c b/lib/pairing.c
+--- a/lib/pairing.c
++++ b/lib/pairing.c
+@@ -94,6 +94,10 @@ pairing_init_generate(const char *device_id, const char *keyfile, int *result)
+     }
+ 
+     pairing->ed = ed25519_key_generate(device_id, keyfile, result);
++    if (!pairing->ed) {   /* ParkCast: *result holds the ED25519_KEY_ERR_* code */
++        free(pairing);
++        return NULL;
++    }
+ 
+     return pairing;
+ }
+diff --git a/lib/raop.c b/lib/raop.c
+--- a/lib/raop.c
++++ b/lib/raop.c
+@@ -658,8 +658,9 @@ raop_init2(raop_t *raop, int nohold, const char *device_id, const char *keyfile)
+     int new_key = 0;
+     pairing = pairing_init_generate(device_id, keyfile, &new_key);
+     if (!pairing) {
+-        logger_log(raop->logger, LOGGER_ERR, "failed to create new public key for pairing");
+-        return -1;
++        /* ParkCast: hand back the RAOP_KEY_ERR_* code; the keyfile is never rewritten on failure */
++        logger_log(raop->logger, LOGGER_ERR, "failed to load or create the pairing key (%d)", new_key);
++        return new_key < 0 ? new_key : -1;
+     }
+     /* store PK as a string in raop->pk_str */
+     memset(raop->pk_str, 0, sizeof(raop->pk_str));
+@@ -673,7 +674,7 @@ raop_init2(raop_t *raop, int nohold, const char *device_id, const char *keyfile)
+     free(pk_str);
+ #endif
+     if (new_key) {
+-        logger_log(raop->logger, LOGGER_INFO,"*** A new Public Key has been created and stored in %s", keyfile);
++        logger_log(raop->logger, LOGGER_INFO,"*** A new Public Key has been created and stored");   /* ParkCast: no path */
+     }
+ 
+     /* Set HTTP callbacks to our handlers */
+diff --git a/lib/raop.h b/lib/raop.h
+--- a/lib/raop.h
++++ b/lib/raop.h
+@@ -137,6 +137,12 @@ void raop_handle_eos(raop_t *raop);
+ void ntp_global_init(void);
+ 
+ RAOP_API raop_t *raop_init(raop_callbacks_t *callbacks);
++/* ParkCast: raop_init2 returns 0, -1 for a general failure, or one of these keyfile codes (crypto.h) */
++#define RAOP_KEY_ERR_READ      -2
++#define RAOP_KEY_ERR_PARSE     -3
++#define RAOP_KEY_ERR_CREATE    -4
++#define RAOP_KEY_ERR_WRITE     -5
++#define RAOP_KEY_ERR_GENERATE  -6
+ RAOP_API int raop_init2(raop_t *raop, int nohold, const char *device_id, const char *keyfile);
+ RAOP_API void raop_set_log_level(raop_t *raop, int level);
+ RAOP_API void raop_set_log_callback(raop_t *raop, raop_log_callback_t callback, void *cls);
