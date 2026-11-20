@@ -3,6 +3,8 @@ package parkcast.core.steps;
 import java.util.ArrayList;
 import java.util.List;
 import parkcast.core.ReceiverRuntime;
+import parkcast.core.adapter.ConfigAdapter;
+import parkcast.core.doubles.FakeConfigReader;
 import parkcast.core.doubles.BlackCover;
 import parkcast.core.doubles.FakeCodecFactory;
 import parkcast.core.doubles.FakeCrashHook;
@@ -15,6 +17,9 @@ import parkcast.core.doubles.Trace;
 import parkcast.gate.World;
 import parkcast.gate.harness.Fakes;
 import parkcast.gate.harness.VirtualScheduler;
+import parkcast.gate.port.AccSource;
+import parkcast.gate.port.ParkGetter;
+import parkcast.gate.port.ReverseSource;
 
 /**
  * One scenario's world: the gate's doubles (through the gate {@link World}) plus the S3 doubles, and the
@@ -53,7 +58,7 @@ public final class S3World {
     public long ranUntil = -1;
 
     public ReceiverRuntime build() {
-        return new ReceiverRuntime(scheduler, g.park, g.acc, g.reverse, g.notices, g.logs, g.config, g.build,
+        return new ReceiverRuntime(scheduler, parkOverride != null ? parkOverride : g.park, accOverride != null ? accOverride : g.acc, reverseOverride != null ? reverseOverride : g.reverse, g.notices, g.logs, new ConfigAdapter(configReader()), g.build,
                 g.regulation, g.screen, g.session, g.vehicle, g.displayWidth, fs, ifaces, nativeLib, nsd, codecs,
                 cover, crash, VERSION, COMMIT, UXPLAY);
     }
@@ -143,4 +148,18 @@ public final class S3World {
     }
     /** Runs on the new runtime before onCreate, for steps that act before the filter is ready. */
     public java.util.function.Consumer<ReceiverRuntime> beforeCreate;
+
+    /** A Park getter that replaces the gate's Park double when set (the AIR-058 adapter over its doubles). */
+    public ParkGetter parkOverride;
+    private FakeConfigReader configReader;
+
+    /** The config file as the fake file system serves it at the one installed path (AIR-063). */
+    public FakeConfigReader configReader() {
+        if (configReader == null) configReader = new FakeConfigReader(g.config, trace);
+        return configReader;
+    }
+
+    /** ACC and REVERSE_ON sources that replace the gate doubles when set (the AIR-059 and AIR-060 adapters). */
+    public AccSource accOverride;
+    public ReverseSource reverseOverride;
 }

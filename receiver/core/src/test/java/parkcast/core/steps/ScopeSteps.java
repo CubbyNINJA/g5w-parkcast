@@ -17,6 +17,11 @@ import java.util.List;
 public final class ScopeSteps {
     private WholeAppScan scan;
     private boolean manifestOnly;
+    private final AdapterScopeSteps adapters;
+
+    public ScopeSteps(AdapterScopeSteps adapters) {
+        this.adapters = adapters;
+    }
 
     @When("the static scan runs")
     public void scanRuns() throws Exception {
@@ -38,6 +43,10 @@ public final class ScopeSteps {
     @Then("it finds no {}")
     public void findsNo(String forbidden) {
         assertNotNull(scan, "the static scan has not run");
+        if (adapters.handles(forbidden)) { // the Android-adapter rules (AIR-058 to AIR-066)
+            adapters.findsNo(forbidden);
+            return;
+        }
         assertTrue(scan.fileCount() > 0, "the static scan read no files");
         // The AIR-082 rows end in " category" and read the manifest only; every other row reads the whole app.
         assertTrue(manifestOnly == forbidden.endsWith(" category"), "\"" + forbidden + "\" after the wrong scan step");
