@@ -13,9 +13,9 @@ import parkcast.gate.port.Win;
 import parkcast.gate.port.WindowSpec;
 
 /**
- * AIR-061: each notice is a toast's view, added by the receiver as a window of the spec's type. The toast is
- * never shown through the notification service; its gravity and offsets are only read, so notices sit where
- * this unit's system would put that toast.
+ * AIR-061: each notice is the view of {@code Toast.makeText(...).getView()}, added by the receiver as a window of
+ * the spec's type. No toast is ever shown through the notification service. The placement is read from a fresh
+ * {@code Toast(Context)}, the same constructor makeText uses, so notices sit where this unit would put a toast.
  */
 final class AndroidNoticeWindows implements NoticeWindows {
     private final Context context;
@@ -28,8 +28,7 @@ final class AndroidNoticeWindows implements NoticeWindows {
 
     @Override
     public NoticeView create(String text) {
-        Toast toast = Toast.makeText(context, text, Toast.LENGTH_LONG);
-        return new ToastNotice(toast, toast.getView());
+        return new ToastNotice(Toast.makeText(context, text, Toast.LENGTH_LONG).getView());
     }
 
     @Override
@@ -42,7 +41,7 @@ final class AndroidNoticeWindows implements NoticeWindows {
 
     @Override
     public Placement placementFrom(NoticeView regFailToast) {
-        Toast t = ((ToastNotice) regFailToast).toast;
+        Toast t = new Toast(context);
         return new Placement(t.getGravity(), t.getXOffset(), t.getYOffset());
     }
 
@@ -64,11 +63,9 @@ final class AndroidNoticeWindows implements NoticeWindows {
     }
 
     private static final class ToastNotice implements NoticeView {
-        final Toast toast;
         final View view;
 
-        ToastNotice(Toast toast, View view) {
-            this.toast = toast;
+        ToastNotice(View view) {
             this.view = view;
         }
     }

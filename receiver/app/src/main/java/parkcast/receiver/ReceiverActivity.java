@@ -40,7 +40,7 @@ public final class ReceiverActivity extends Activity {
         AndroidCoverView cover = new AndroidCoverView(this);
 
         runtime = new ReceiverRuntime(scheduler, park, new AccReceiver(broadcasts, threads),
-                new ReverseReceiver(broadcasts), new AndroidNoticeWindows(this, getWindowManager()),
+                new ReverseReceiver(new ReverseOnBroadcasts(this, main)), new AndroidNoticeWindows(this, getWindowManager()),
                 new LogDirFiles(new FileLogDir()), new ConfigAdapter(new FilePathReader()), new AndroidBuildInfo(),
                 AndroidRegulation.source(), new NoCalls.NoDisplay(), new NoCalls.NoMirrorSession(),
                 new NoCalls.NoBus(), DISPLAY_WIDTH, new AndroidAppFiles(getFilesDir()), new AndroidInterfaceQuery(),
