@@ -172,10 +172,12 @@ tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn 'check
 
 // Native prep (design "Native build", OD-189): fetch, verify and patch the pinned sources before CMake
 // configures, so one ./gradlew invocation on a clean clone yields the signed APK (AIR-046(b)). Python 3 is a
-// prerequisite: -Pparkcast.python=<exe>, else this repo's .venv, else "python" on PATH.
+// prerequisite: -Pparkcast.python=<exe>, else parkcast.python in local.properties, else this repo's .venv,
+// else "python" on PATH.
 def venvPython = rootProject.file('.venv/Scripts/python.exe')
 def prepPython = providers.gradleProperty('parkcast.python')
-        .orElse(venvPython.isFile() ? venvPython.absolutePath : 'python').get()
+        .orElse(localProps.getProperty('parkcast.python')
+                ?: (venvPython.isFile() ? venvPython.absolutePath : 'python')).get()
 tasks.register('nativePrep', Exec) {
     description = 'Fetches, checks and patches OpenSSL, libplist and UxPlay for libparkcast (native_prep.py).'
     workingDir rootProject.file('tools')
