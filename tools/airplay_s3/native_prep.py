@@ -54,10 +54,12 @@ import hashlib
 import os
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
 import tarfile
+import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass, field
@@ -158,8 +160,25 @@ def check_pins(lock: Lock):
 # ---------------------------------------------------------------------------------------------------------
 
 def default_fetch(url, dest):
-    with urllib.request.urlopen(url, timeout=120) as resp, open(dest, "wb") as out:
-        shutil.copyfileobj(resp, out)
+    """Download `url` to `dest` with TLS verification on. Python verifies only against certificates already in
+    the Windows store, so a missing intermediate (GitHub's release-asset host) fails there although Windows'
+    own TLS would fetch it. On that one error, curl retries over HTTPS only, still verifying. Integrity rests on
+    the pinned SHA-256 either way (fetch_dep)."""
+    try:
+        with urllib.request.urlopen(url, timeout=120) as resp, open(dest, "wb") as out:
+            shutil.copyfileobj(resp, out)
+        return
+    except urllib.error.URLError as exc:
+        if not isinstance(getattr(exc, "reason", None), ssl.SSLCertVerificationError):
+            raise
+        curl = shutil.which("curl")
+        if not curl:
+            raise
+    res = subprocess.run([curl, "--fail", "--silent", "--show-error", "--location", "--proto", "=https",
+                          "--proto-redir", "=https", "--max-time", "600", "--output", str(dest), url],
+                         capture_output=True, text=True)
+    if res.returncode != 0:
+        raise OSError(f"curl failed ({res.returncode}): {res.stderr.strip()}")
 
 
 def _sha256(path: Path) -> str:
