@@ -420,11 +420,13 @@ Feature: The AirPlay receiver's runtime, with doubles
   Scenario: A mid-session decoder error releases the decoder and is logged only
     Given a session starts at 1000 ms
     And the fake codec throws MediaCodec.CodecException at 3000 ms
+    And the library double delivers the H.264 codec configuration again at 3500 ms
     When the receiver runs for 20000 ms
     Then the fake codec was released
     And the log has "decoder error"
     And the session is ended
     And the fake codec factory recorded no create call after 3000 ms
+    And the screen is black from 3000 ms to 20000 ms
     And no notice add call was made and no notice is held
 
   @offline @normal @AIR-057 @AT-57 @OD-150 @OD-158
@@ -446,6 +448,14 @@ Feature: The AirPlay receiver's runtime, with doubles
     And the first output buffer released with render true after the gate next permits video came from an access unit queued after the gate permitted video
     And the library double saw the connection kept, with no close, from 500 ms to 3000 ms
     And the MirrorSession and VehicleBus doubles recorded zero calls
+
+  @offline @boundary @AIR-057 @AT-57 @OD-150 @OD-158
+  Scenario: A unit queued while blocked is not rendered when video is permitted during its decode
+    Given a session starts at 504 ms
+    And the car leaves Park at 1000 ms and returns to Park at 2000 ms
+    When the receiver runs for 3000 ms
+    Then the access unit still being decoded when the gate next permitted video was released with render false
+    And the first output buffer released with render true after the gate next permits video came from an access unit queued after the gate permitted video
 
   @offline @normal @AIR-058 @AT-58 @OD-63
   Scenario: The Park getter is called every 200 ms on a worker thread, one call at a time

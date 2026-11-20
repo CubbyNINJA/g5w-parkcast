@@ -228,6 +228,12 @@ public final class StreamSteps {
         w.codecs.errorAt = ms;
     }
 
+    /** AIR-056(d): a codec configuration re-delivered for the dead session creates no decoder. */
+    @Given("the library double delivers the H.264 codec configuration again at {int} ms")
+    public void configAgainAt(int ms) {
+        w.scheduler.script(ms, VirtualScheduler.AFTER, () -> w.nativeLib.callback("video_set_codec_and_size"));
+    }
+
     @Then("the fake codec was released")
     public void codecReleased() {
         ensureRun(w);
@@ -384,6 +390,30 @@ public final class StreamSteps {
         assertTrue(index < queued.size(), "no unit for output " + index);
         assertTrue(queued.get(index).t >= permittedAt, "rendered a unit queued at " + queued.get(index).t
                 + " ms, before video was permitted at " + permittedAt + " ms");
+    }
+
+    /** AIR-057(a)(b)(d): a unit still being decoded when video is permitted again was blocked when queued. */
+    @Then("the access unit still being decoded when the gate next permitted video was released with render false")
+    public void inFlightUnitNotRendered() {
+        ensureRun(w);
+        long blockedAt = -1, permittedAt = -1;
+        for (Fakes.Line l : w.lines()) {
+            String b = S3World.body(l);
+            if (blockedAt < 0 && b.startsWith("gate transition prev=permitted new=blocked")) blockedAt = l.t;
+            else if (blockedAt >= 0 && permittedAt < 0 && b.startsWith("gate transition prev=blocked new=permitted"))
+                permittedAt = l.t;
+        }
+        assertTrue(permittedAt >= 0, "the gate never permitted video again: " + w.bodies());
+        List<Trace.Entry> queued = queued();
+        int index = -1;
+        for (int i = 0; i < queued.size(); i++) {
+            long t = queued.get(i).t;
+            if (t < permittedAt && permittedAt < t + 5) index = i;
+        }
+        assertTrue(index >= 0, "no unit was being decoded at " + permittedAt + " ms");
+        Trace.Entry r = releaseOf(w.trace.current("codec", "releaseOutput"), index);
+        assertTrue(r != null, "no output released for the unit queued at " + queued.get(index).t + " ms");
+        assertTrue(r.details.endsWith("render=false"), "unit queued at " + queued.get(index).t + ": " + r.details);
     }
 
     @Then("the library double saw the connection kept, with no close, from {int} ms to {int} ms")
