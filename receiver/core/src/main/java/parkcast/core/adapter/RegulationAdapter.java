@@ -5,7 +5,7 @@ import parkcast.gate.port.RegulationSource;
 
 /**
  * The receiver's regulation state over the stock regulation service (OD-195). At registration it reads the
- * status once, then listens for changes: 0 is reported as "off" and 1 as "on". Any other value, a missing
+ * status once, then listens for changes: 0 is reported as "unrestricted" and 1 as "restricted", S2's words (11_parking_logs.feature). Any other value, a missing
  * service, a call that throws, or the service dying is reported as unavailable with a reason. Unregistering
  * removes the listener. It only reads: the port it uses has no way to change the state.
  */
@@ -67,8 +67,8 @@ public final class RegulationAdapter implements RegulationSource {
     }
 
     private static void report(RegulationListener l, int status) {
-        if (status == 0) l.state("off");
-        else if (status == 1) l.state("on");
+        if (status == 0) l.state("unrestricted");
+        else if (status == 1) l.state("restricted");
         else l.unavailable("unknown value " + status);
     }
 }

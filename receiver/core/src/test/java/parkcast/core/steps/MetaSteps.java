@@ -350,8 +350,8 @@ public final class MetaSteps {
             inner.register(new RegulationListener() {
                 @Override
                 public void state(String s) {
-                    if ("on".equals(s)) l.state("restricted");
-                    else if ("off".equals(s)) l.state("unrestricted");
+                    // The adapter itself speaks S2's words; anything else fails the run.
+                    if ("restricted".equals(s) || "unrestricted".equals(s)) l.state(s);
                     else throw new AssertionError("the regulation adapter reported state " + s);
                 }
 
