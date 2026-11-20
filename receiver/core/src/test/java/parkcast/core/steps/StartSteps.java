@@ -135,6 +135,13 @@ public final class StartSteps {
         }
     }
 
+    @Then("the first record is the start marker and the record right after it is {string}")
+    public void afterMarker(String s) {
+        List<String> b = w.bodies();
+        assertTrue(b.size() >= 2 && b.get(0).startsWith("parkcast start "), "no start marker first in " + b);
+        assertEquals(s, b.get(1), "record after the start marker in " + b);
+    }
+
     @Then("the start marker has {string}")
     public void markerHas(String s) {
         String marker = null;

@@ -25,6 +25,13 @@ public final class NoticeAddSteps {
         w.g.build.product = CommonSteps.SUPPORTED_BUILD;
     }
 
+    /** The config file holds an explicit false (OD-196: `parking check off` follows the start marker). */
+    @Given("the parking check is off, on a supported build")
+    public void checkOffSupported() {
+        checkOnSupported();
+        w.g.config.holds("video.require_park=false");
+    }
+
     @Given("the Park getter replies {int} within {int} ms")
     public void parkReplies(int v, int ms) {
         w.g.park.constant = Fakes.Reply.valueAfter(v, ms);

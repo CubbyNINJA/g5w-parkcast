@@ -617,6 +617,13 @@ Feature: The AirPlay receiver's runtime, with doubles
     And the gate's start record has the effective value true with "reason=the missing file"
     And the fake file system recorded no create of that path
 
+  @offline @normal @AIR-063 @AIR-071 @AT-71 @OD-196
+  Scenario: With the parking check off, "parking check off" is the record right after the start marker
+    Given the parking check is off, on a supported build
+    When the receiver runs for 1000 ms
+    Then the start marker has "require_park=false"
+    And the first record is the start marker and the record right after it is "parking check off"
+
   @offline @normal @AIR-064 @AIR-071 @AT-64 @OD-178
   Scenario: The fixture build product counts as supported and is in the start marker
     Given ro.build.product is CVEV.CAN.0000.V015.011.260206

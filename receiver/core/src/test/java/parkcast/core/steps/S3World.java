@@ -125,9 +125,15 @@ public final class S3World {
         return g.lines();
     }
 
-    /** A log line's text without its time prefix. */
+    /**
+     * A log line's text without its time prefix. The prefix must be the uptime in decimal milliseconds only,
+     * the time the line was written (AIR-071(g), OD-196); a line too long to keep is passed over.
+     */
     public static String body(Fakes.Line l) {
         int sp = l.text.indexOf(' ');
+        if (!l.text.startsWith("<") && !l.text.substring(0, sp < 0 ? l.text.length() : sp).equals(Long.toString(l.t))) {
+            throw new AssertionError("log line prefix is not the uptime " + l.t + " in decimal milliseconds: " + l);
+        }
         return sp < 0 ? "" : l.text.substring(sp + 1);
     }
 
