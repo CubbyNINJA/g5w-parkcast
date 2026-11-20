@@ -874,12 +874,14 @@ Feature: The AirPlay receiver's runtime, with doubles
       | an allowlisted record carrying IPv4 192.168.0.50                |
       | an allowlisted record carrying IPv6 fe80::1c2b:3a4d:5e6f:7081   |
       | an allowlisted record carrying MAC 02:1a:2b:3c:4d:5e            |
+      | an allowlisted record carrying MAC 02-1a-2b-3c-4d-5e            |
       | a record off the allowlist carrying the name "Fixture Phone"    |
       | a record off the allowlist carrying "0A1B2C3D4E5F"              |
       | a record off the allowlist reading "fixture unknown text"       |
     And the session ends at 3000 ms
-    Then the three allowlisted records are written with each address replaced by "[redacted]"
+    Then the four allowlisted records are written with each address replaced by "[redacted]"
     And no log record contains "192.168.0.50", "fe80::1c2b:3a4d:5e6f:7081", "02:1a:2b:3c:4d:5e", "Fixture Phone", "0A1B2C3D4E5F" or "fixture unknown text"
+    And no log record contains "02-1a-2b-3c-4d-5e"
     And the withheld count logged at session end is 3
 
   @offline @failure @AIR-073 @AT-73 @OD-155 @OD-170
@@ -900,7 +902,7 @@ Feature: The AirPlay receiver's runtime, with doubles
       | "Device ID 0A1B2C3D4E5F"                   |
       | "<?xml version=\"1.0\"?>"                  |
       | "<plist version=\"1.0\">"                  |
-      | "aesiv 00112233445566778899aabbccddeeff"   |
+      | "aesiv 00112233"                           |
       | "ekey 00112233"                            |
       | "aeskey 00112233"                          |
       | "ECDH 00112233"                            |
@@ -1045,3 +1047,13 @@ Feature: The AirPlay receiver's runtime, with doubles
       | the key file's path               |
       | the key file's name               |
       | the fake key fixture's bytes      |
+      | a 16-byte slice of the fake key fixture's bytes |
+
+  @offline @failure @AIR-072 @AIR-073 @AT-72 @AT-73 @OD-196
+  Scenario: A record that arrives while the key file cannot be read is dropped and counted
+    Given a session starts at 1000 ms
+    And every read of the key file throws IOException from 1500 ms
+    And the library double delivers at 2000 ms an allowlisted record that also carries "KEY-READ-7c1e"
+    And the session ends at 3000 ms
+    Then no part of that record was written
+    And the withheld count logged at session end is 1

@@ -111,6 +111,16 @@ public final class FilterSteps {
         for (String row : table.asList().subList(1, table.height())) deliverAt(t, describedRecord(row));
     }
 
+    @Given("every read of the key file throws IOException from {int} ms")
+    public void keyReadsThrowFrom(int t) {
+        w.scheduler.script(t, VirtualScheduler.AFTER, new Runnable() {
+            @Override
+            public void run() {
+                w.fs.readThrows.add(S3World.KEY_PATH);
+            }
+        });
+    }
+
     @Given("the session ends at {int} ms")
     public void sessionEndsAt(int t) {
         w.start();
@@ -158,11 +168,11 @@ public final class FilterSteps {
         deliverAt(t2, BASE + " " + run(B64, 43));
     }
 
-    @Then("the three allowlisted records are written with each address replaced by {string}")
-    public void threeRedacted(String with) {
+    @Then("the four allowlisted records are written with each address replaced by {string}")
+    public void fourRedacted(String with) {
         int n = 0;
         for (String b : w.bodies()) if (b.equals(BASE + " " + with)) n++;
-        assertEquals(3, n, "bodies " + w.bodies());
+        assertEquals(4, n, "bodies " + w.bodies());
     }
 
     @Then("no log record contains {string}, {string}, {string}, {string}, {string} or {string}")
@@ -227,6 +237,9 @@ public final class FilterSteps {
         if (s.equals("the key file's name")) return S3World.KEY_NAME;
         if (s.equals("the key file's path")) return S3World.KEY_PATH;
         if (s.equals("the fake key fixture's bytes")) return new String(FakeFileSystem.VALID_KEY, StandardCharsets.ISO_8859_1);
+        if (s.equals("a 16-byte slice of the fake key fixture's bytes")) {
+            return new String(java.util.Arrays.copyOfRange(FakeFileSystem.VALID_KEY, 8, 24), StandardCharsets.ISO_8859_1);
+        }
         if (s.length() < 2 || !s.startsWith("\"") || !s.endsWith("\"")) throw new IllegalArgumentException(s);
         String in = s.substring(1, s.length() - 1);
         StringBuilder b = new StringBuilder();
