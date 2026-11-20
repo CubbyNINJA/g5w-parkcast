@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Minimal on purpose (S2_GATE.md): no permissions and no manifest receiver for REVERSE_ON. The app
-     slice adds its components here. -->
+<!-- AIR-068, AIR-082: INTERNET is the only permission, and the one activity is not exported and has no
+     launcher or home category. There are no receivers, services or providers: REVERSE_ON and ACC are
+     registered in code. The stick script starts the activity by name (am start -n). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="parkcast.receiver">
-    <uses-sdk android:minSdkVersion="19"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <application
+        android:allowBackup="false"
+        android:label="ParkCast">
+        <activity
+            android:name=".ReceiverActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"/>
+    </application>
 </manifest>

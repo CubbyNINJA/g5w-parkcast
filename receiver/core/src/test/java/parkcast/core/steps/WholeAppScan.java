@@ -154,7 +154,9 @@ final class WholeAppScan {
                 any("CAN access", "\\b(CanManager|AF_CAN|PF_CAN|ICan\\w*)\\b|/dev/can|(?i)socketcan|hkmc[./]can\\b", CODE),
                 any("regulation setter", "(?i)\\b\\w*regulation\\w*\\s*\\.\\s*set\\w*\\s*\\(|\\bsetRegulation\\w*", CODE),
                 any("registerSystemOffResponder", "registerSystemOffResponder", CODE),
-                any("micom power", "(?i)micom\\w*power|\\bIMicom\\w*|hkmc[./]micom", CODE),
+                // AIR-059(b) forbids the micom POWER service (transaction 14); AIR-058 requires com.hkmc.micom.
+                // VehicleInfoManager.getGearPStatus(), so this rule names the power service only (owner, OD-197).
+                any("micom power", "(?i)micom\\w*power|\\bIMicomPower\\w*|hkmc[./]micom[./]power", CODE),
                 any("binder transaction", "\\.transact\\s*\\(|IBinder\\.transact\\(", CODE),
                 any("REVERSE_OFF", "\\bREVERSE_OFF\\b", CODE),
                 any("isRearViewOn", "\\bisRearViewOn\\b", CODE));

@@ -40,7 +40,7 @@ final class DecoderControl implements NativeEvents {
     }
 
     @Override
-    public void codecConfig(int generation, String codecName, int width, int height) {
+    public void codecConfig(int generation, String codecName, int width, int height, byte[] csd) {
         if (stopped || generation == deadGen) return;
         if (sessions != null) sessions.codec(codecName, width, height);
         else log.record("session " + generation + " codec " + codecName + " " + width + "x" + height);
@@ -72,7 +72,7 @@ final class DecoderControl implements NativeEvents {
             return;
         }
         try {
-            codec.configure(MIME, width, height, cover.surface());
+            codec.configure(MIME, width, height, csd == null ? new byte[0] : csd, cover.surface());
             codec.start();
         } catch (Exception e) {
             Codec c = codec;
@@ -97,11 +97,11 @@ final class DecoderControl implements NativeEvents {
     }
 
     @Override
-    public void accessUnit(int generation, long ptsMs) {
-        if (stopped || codec == null || generation != codecGen) return;
+    public void accessUnit(int generation, long ptsMs, byte[] au) {
+        if (stopped || codec == null || generation != codecGen || au == null) return;
         try {
             pending.add(gate.videoPermitted());
-            codec.queue(new byte[0], ptsMs * 1000L);
+            codec.queue(au, ptsMs * 1000L);
         } catch (Exception e) {
             decoderError(e);
             return;

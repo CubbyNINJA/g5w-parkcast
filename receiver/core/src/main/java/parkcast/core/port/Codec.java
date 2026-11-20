@@ -2,7 +2,8 @@ package parkcast.core.port;
 
 /** One {@code MediaCodec} decoder in synchronous mode on the activity Surface (AIR-056). */
 public interface Codec {
-    void configure(String mime, int width, int height, Object surface) throws Exception;
+    /** Configures the decoder; a non-empty {@code csd} is passed as the format's codec-specific data. */
+    void configure(String mime, int width, int height, byte[] csd, Object surface) throws Exception;
 
     void start() throws Exception;
 
