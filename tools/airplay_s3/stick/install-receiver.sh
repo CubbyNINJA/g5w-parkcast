@@ -16,7 +16,7 @@ export PATH LD_LIBRARY_PATH
 
 ID=airplay.receiver
 PKG=parkcast.receiver
-# TODO(S3): the receiver's launch activity. The manifest declares none yet; set this to match it.
+# The one activity in receiver/app/src/main/AndroidManifest.xml (not exported; started by name as root).
 COMPONENT=$PKG/.ReceiverActivity
 DIR=$ROOT/data/nemesis/logs/airplay-receiver
 PLIST=$ROOT/data/system/packages.list
