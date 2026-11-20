@@ -189,7 +189,7 @@ Feature: The AirPlay receiver's runtime, with doubles
       | at 4999 ms | a dns_sd connect attempt was made at 4999 ms and the log has "advertise ok"                                                |
       | at 5000 ms | the log has a record that is exactly "advertise failed reason=discovery-timeout code=none", and no dns_sd connect was made |
       | at 5001 ms | the log has a record that is exactly "advertise failed reason=discovery-timeout code=none", and no dns_sd connect was made |
-      | never      | the log has a record that is exactly "advertise failed reason=discovery-timeout code=none", and no dns_sd connect was made |
+      | never      | the log has a record that is exactly "advertise failed reason=discovery-timeout code=none", logged at exactly 5000 ms, and no dns_sd connect was made |
 
   @offline @boundary @AIR-050 @AT-50 @OD-164
   Scenario: The dns_sd socket is retried every 250 ms, and one that appears at 4,750 ms connects
@@ -226,6 +226,7 @@ Feature: The AirPlay receiver's runtime, with doubles
       | fault                                                                                   | reason                              | withdrawn                                    |
       | getSystemService(Context.NSD_SERVICE) returns null                                      | reason=null-manager code=none       | no registration was made                     |
       | getSystemService(Context.NSD_SERVICE) throws SecurityException                          | reason=security-exception code=none | no registration was made                     |
+      | discoverServices throws SecurityException                                               | reason=security-exception code=none | no registration was made                     |
       | onStartDiscoveryFailed is delivered with error code 0                                   | reason=discovery-failed code=0      | no registration was made                     |
       | onDiscoveryStarted never arrives                                                        | reason=discovery-timeout code=none  | no registration was made                     |
       | /dev/socket/mdnsd is missing for the whole connect window                               | reason=ENOENT code=none             | no registration was made                     |

@@ -17,6 +17,8 @@ public final class FakeNsd implements NsdWake {
     public boolean returnsNull;
     /** {@code getSystemService} throws SecurityException. */
     public boolean throwsSecurity;
+    /** {@code discoverServices} throws SecurityException; the call is traced as "discoverThrew", not "discover". */
+    public boolean discoverThrowsSecurity;
     /** When non-null, {@code onStartDiscoveryFailed} with this code replaces {@code onDiscoveryStarted}. */
     public Integer failCode;
     /** When failing, the absolute time the failure is delivered; -1 for 10 ms after discover. */
@@ -38,6 +40,10 @@ public final class FakeNsd implements NsdWake {
         return new NsdHandle() {
             @Override
             public void discover(String type, final Listener l) {
+                if (discoverThrowsSecurity) {
+                    trace.add("nsd", "discoverThrew", "java.lang.SecurityException");
+                    throw new SecurityException("synthetic");
+                }
                 trace.add("nsd", "discover", type);
                 final int start = scheduler.startIndex;
                 long at = scheduler.now() + STARTED_AFTER_MS;

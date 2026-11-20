@@ -11,12 +11,13 @@ import java.util.ArrayList;
 import java.util.List;
 import parkcast.core.doubles.FakeNativeLibrary;
 import parkcast.core.doubles.Trace;
+import parkcast.gate.harness.Fakes;
 import parkcast.gate.harness.VirtualScheduler;
 
 /** Steps for advertising (AIR-050): the NsdManager wake, the dns_sd connect window and the registrations. */
 public final class AdvertiseSteps {
     /** NsdManager calls the fake records; anything else under "nsd" would be a call this list does not allow. */
-    private static final String[] NSD_ALLOWED = {"get", "discover", "started", "startFailed", "stop", "found", "lost"};
+    private static final String[] NSD_ALLOWED = {"get", "discover", "discoverThrew", "started", "startFailed", "stop", "found", "lost"};
 
     private final S3World w;
     /** When "discoverServices returns at N ms" was given, N; checked once the scenario has run. */
@@ -82,6 +83,11 @@ public final class AdvertiseSteps {
     @Given("getSystemService\\(Context.NSD_SERVICE) throws SecurityException")
     public void nsdThrows() {
         w.nsd.throwsSecurity = true;
+    }
+
+    @Given("discoverServices throws SecurityException")
+    public void discoverThrows() {
+        w.nsd.discoverThrowsSecurity = true;
     }
 
     @Given("onStartDiscoveryFailed is delivered with error code {int}")
@@ -235,6 +241,14 @@ public final class AdvertiseSteps {
     public void exactlyAndNoConnect(String s) {
         new CommonS3Steps(w).logHasExactly(s);
         assertTrue(w.trace.current("dnssd", "connect").isEmpty(), "connects: " + w.trace.current("dnssd", "connect"));
+    }
+
+    @Then("the log has a record that is exactly {string}, logged at exactly {int} ms, and no dns_sd connect was made")
+    public void exactlyAtAndNoConnect(String s, int t) {
+        exactlyAndNoConnect(s);
+        List<Long> at = new ArrayList<Long>();
+        for (Fakes.Line l : w.g.logs.lines) if (S3World.body(l).equals(s)) at.add(l.t);
+        assertTrue(at.contains((long) t), "\"" + s + "\" logged at " + at + " ms, not " + t);
     }
 
     @Then("dns_sd connect attempts were made only at {} ms of the connect window")
