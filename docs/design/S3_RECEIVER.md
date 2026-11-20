@@ -210,6 +210,34 @@ These match file 13 l.806-816's step list one for one.
   dequeues. If main-thread load is too high on the unit, the `Codec` adapter moves to a codec `HandlerThread`
   that posts output indexes back; core does not change, because `Codec` is a port.
 
+## JNI contract
+
+The one boundary between `receiver/app` and `libparkcast.so` (OD-187, AIR-055(a) and (c)). Java calls only
+these entry points, and native code calls Java only through the delivery thread.
+
+```java
+package parkcast.receiver;
+final class NativeBridge {
+    // stage: 0 KEYCHECK, 1 BIND, 2 ADVERTISE, 3 ACCEPT. Returns "ok <token>" or "fail <token>"; the token is
+    // StartResult's (for example "mdnsd up", "stdio-failed", "port busy tcp 35001", "ENOENT").
+    static native String nativeStart(int stage, String keyfile, String address, int width, int height, int fps);
+    // phase: 0 ACCEPT, 1 SESSION, 2 REGISTRATIONS, 3 PORTS. Never throws; failures come back as a log event.
+    static native void nativeStop(int phase);
+    static native int nativeGeneration();
+    static native boolean nativeAccepting();
+    // Called by the one native delivery thread, never by a UxPlay thread. Posts to the main Handler.
+    static void onNative(int generation, int kind, int a, int b, long ptsMs, String text, byte[] data);
+}
+```
+
+Event kinds for `onNative`, each mapped to one `NativeEvents` call on the event thread: 1 connection accepted
+(`text` = model), 2 session started, 3 codec configuration (`text` = `h264` or `h265`, `a` x `b`, `data` =
+the codec-specific data), 4 access unit (`ptsMs`, `data` = one Annex-B access unit), 5 session ended, 6
+advertise lost, 7 log record (`text`, unfiltered: core's filter runs before any write). `NativeEvents`
+carries the bytes too (`codecConfig(..., byte[] csd)`, `accessUnit(gen, ptsMs, byte[] au)`), so the
+decoder adapter can queue them. Byte arrays are copied once, on the delivery thread; UxPlay threads only
+copy into the ring (Threads, above).
+
 ## Native build
 
 **NDK check in three layers** (AIR-043), with no fallback NDK, ABI or API level: (1) a `checkNdk` Gradle task
