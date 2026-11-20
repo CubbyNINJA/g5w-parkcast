@@ -19,4 +19,9 @@ public final class CoreSeams {
             }
         });
     }
+
+    /** A frame for steps that pump the gate directly, standing in for the decoder's output. */
+    public static void frame(ReceiverRuntime r, parkcast.gate.port.Frame f) {
+        r.onFrame(f);
+    }
 }

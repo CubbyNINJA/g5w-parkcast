@@ -51,6 +51,9 @@ public final class FakeNativeLibrary implements NativeLibrary {
         connected = false;
         windowStart = -1;
         registered.clear();
+        stdioNull = false;
+        sessionOpen = false;
+        dropping = false;
     }
 
     @Override
@@ -64,9 +67,11 @@ public final class FakeNativeLibrary implements NativeLibrary {
             case ADVERTISE:
                 trace.add("native", "advertise", "");
                 events = e;
+                print();
                 return connected ? register() : probe();
             case ACCEPT:
                 trace.add("native", "accept", "");
+                print();
                 events = e;
                 accepting = true;
                 return StartResult.ok("accepting");
@@ -81,10 +86,13 @@ public final class FakeNativeLibrary implements NativeLibrary {
             return StartResult.failed(StartResult.STDIO_FAILED);
         }
         trace.add("stdio", "dup2", "fd 1,2 -> /dev/null");
+        stdioNull = true;
         trace.add("native", "raop_init", "");
         trace.add("native", "raop_set_log_callback", "");
         trace.add("native", "raop_set_log_level", plan.logLevel);
+        print();
         trace.add("native", "raop_init2", "keyfile=" + plan.keyfile);
+        print();
         try {
             if (!fs.files.containsKey(plan.keyfile)) {
                 fs.create(plan.keyfile, FakeFileSystem.VALID_KEY, KEY_MODE);
@@ -111,6 +119,10 @@ public final class FakeNativeLibrary implements NativeLibrary {
             trace.add("socket", "bind", sock);
             bound.add(sock);
         }
+        long features = BASE_FEATURES | (plan.h265 ? HEVC_FEATURE : 0L);
+        trace.add("native", "receiver_info", "width=" + plan.width + " height=" + plan.height + " refresh="
+                + plan.refreshHz + " h265=" + plan.h265 + " features=0x" + Long.toHexString(features));
+        print();
         return StartResult.ok("bound");
     }
 
@@ -124,17 +136,32 @@ public final class FakeNativeLibrary implements NativeLibrary {
         if (!accepting || events == null) return;
         generation++;
         trace.add("native", "session", "gen=" + generation);
-        events.sessionStarted(generation);
-        events.connectionAccepted(generation, model);
+        sessionOpen = true;
+        dropping = false;
+        deliverStarted(generation);
+        final NativeEvents e = events;
+        final int gen = generation;
+        final String m = model;
+        deliver("connectionAccepted", () -> e.connectionAccepted(gen, m));
         if (afterAccept != null) deliverLog(afterAccept);
-        events.codecConfig(generation, codec, w, h);
+        trace.add("native", "callback", "video_set_codec_and_size return=0");
+        deliverConfig(generation, codec, w, h);
+        streamFrom(generation);
     }
 
     @Override
     public void stop(Phase p) {
         if (stopThrows.contains(p)) throw new IllegalStateException(trace.add("native", "stopThrew", p.name()).toString());
         trace.add("native", "stop", p.name());
-        if (p == Phase.ACCEPT) accepting = false;
+        print();
+        if (p == Phase.ACCEPT) {
+            accepting = false;
+            dropping = true;
+        }
+        if (p == Phase.SESSION && sessionOpen) {
+            sessionOpen = false;
+            trace.add("native", "session", "ended gen=" + generation);
+        }
         if (p == Phase.REGISTRATIONS) {
             for (String type : registered) trace.add("dnssd", "withdraw", type);
             registered.clear();
@@ -227,6 +254,7 @@ public final class FakeNativeLibrary implements NativeLibrary {
     public void disconnect() {
         if (events == null || generation == 0) return;
         trace.add("native", "session end", "gen=" + generation);
+        sessionOpen = false;
         events.sessionEnded(generation);
     }
 
@@ -234,4 +262,115 @@ public final class FakeNativeLibrary implements NativeLibrary {
     public String model = "iPhone15,2";
     /** A record delivered after the accepted connection and before video_set_codec_and_size; null for none. */
     public String afterAccept;
+    // ---- Stream, callback and stdio fixtures (file 13, AIR-051 to AIR-055) ----
+
+    /** The feature bits the fake advertises without HEVC, and the HEVC bit it would add; both fake values. */
+    public static final long BASE_FEATURES = 0x5A7FFFF7L, HEVC_FEATURE = 1L << 42;
+    /** A made-up HEVC codec-configuration fixture (not a real stream). */
+    public static final byte[] HEVC_FIXTURE = {0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0C, 0x01, 0x7E, 0x48};
+    /** Access units arrive every 16 ms once a session's codec is configured. */
+    public static final long AU_PERIOD_MS = 16;
+
+    /** Set by the world: the clock the stream and the busy window run on. */
+    public parkcast.gate.harness.VirtualScheduler scheduler;
+    /** What the next session's video_set_codec_and_size reports. */
+    public String sessionCodec = "h264";
+    public int sessionW = 1920, sessionH = 720;
+    /** Print this to stdout and stderr on every library call; null = print nothing. */
+    public String printMarker;
+    /** What reached logcat: the marker of each call made while descriptors 1 and 2 were not on /dev/null. */
+    public final List<String> logcat = new ArrayList<>();
+    /** Java is held busy in [busyFrom, busyUntil): deliveries wait until busyUntil. */
+    public long busyFrom = -1, busyUntil = -1;
+
+    private boolean stdioNull, sessionOpen, dropping;
+
+    private void print() {
+        if (printMarker != null && !stdioNull) {
+            logcat.add("stdout " + printMarker);
+            logcat.add("stderr " + printMarker);
+        }
+    }
+
+    private boolean busy() {
+        long now = scheduler.now();
+        return now >= busyFrom && now < busyUntil;
+    }
+
+    /** Hands an event to Java on the Java side's own time: later if Java is busy, never once stopped. */
+    private void deliver(final String name, final Runnable r) {
+        if (dropping || events == null) {
+            trace.add("native", "callback", name + " dropped");
+            return;
+        }
+        if (scheduler != null && busy()) {
+            scheduler.at(busyUntil, () -> deliver(name, r));
+            return;
+        }
+        trace.add("java", "event", name);
+        r.run();
+    }
+
+    private void deliverStarted(final int gen) {
+        final NativeEvents e = events;
+        deliver("sessionStarted", () -> e.sessionStarted(gen));
+    }
+
+    private void deliverConfig(final int gen, final String codec, final int w, final int h) {
+        final NativeEvents e = events;
+        deliver("codecConfig " + codec + " " + w + "x" + h, () -> e.codecConfig(gen, codec, w, h));
+    }
+
+    private void deliverUnit(final int gen, final long pts) {
+        final NativeEvents e = events;
+        deliver("accessUnit " + pts, () -> e.accessUnit(gen, pts));
+    }
+
+    private void streamFrom(final int gen) {
+        if (scheduler == null) return;
+        final long first = scheduler.now();
+        scheduler.at(first, new Runnable() {
+            @Override
+            public void run() {
+                if (!sessionOpen || dropping || generation != gen) return;
+                long now = scheduler.now();
+                trace.add("native", "callback", "video_process returned");
+                deliverUnit(gen, now);
+                scheduler.at(now + AU_PERIOD_MS, this);
+            }
+        });
+    }
+
+    /** The library double calls a callback with its fixture; the callback itself returns at once. */
+    public void callback(String name) {
+        int gen = generation;
+        if ("video_process".equals(name)) {
+            if (dropping) trace.add("native", "callback", name + " dropped");
+            else deliverUnit(gen, scheduler.now());
+        } else if ("video_set_codec_and_size".equals(name)) {
+            if (dropping) trace.add("native", "callback", name + " dropped");
+            else deliverConfig(gen, sessionCodec, sessionW, sessionH);
+        }
+        trace.add("native", "callback", name + " returned");
+    }
+
+    /** A URL, HLS or DRM request: the library refuses it and reports only its kind, never the URL. */
+    public void request(String kind, String url) {
+        String k = kind.toLowerCase(java.util.Locale.ROOT);
+        trace.add("native", "refuse", k);
+        final NativeEvents e = events;
+        final int gen = generation;
+        final String rec = "refused " + k;
+        deliver("log " + rec, () -> e.log(gen, rec));
+    }
+
+    /** audio_process with fixture bytes: the library discards them; nothing reaches Java. */
+    public void audio(byte[] bytes) {
+        trace.add("native", "callback", "audio_process returned");
+    }
+
+    /** Whether a session is open. */
+    public boolean sessionOpen() {
+        return sessionOpen;
+    }
 }

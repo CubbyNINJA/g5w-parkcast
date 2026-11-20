@@ -28,6 +28,11 @@ class NativeLogFilter {
         "video is h265 but the -h265 option was not used",
     };
 
+    /** The native refusal records, allowed only as the whole record (AIR-053(b), OD-185). */
+    static final String[] EXACT = {
+        "refused url", "refused hls", "refused drm",
+    };
+
     /** AIR-073(g): matched case-insensitively anywhere, even inside a longer word. */
     static final String[] TOKENS = {
         "pin", "user-agent", "deviceid", "device id", "aesiv", "ekey", "aeskey", "ecdh", "plist", "<?xml",
@@ -73,6 +78,7 @@ class NativeLogFilter {
     }
 
     private static boolean allowlisted(String record) {
+        for (String x : EXACT) if (record.equals(x)) return true;
         for (String a : ALLOWLIST) if (record.contains(a)) return true;
         return false;
     }

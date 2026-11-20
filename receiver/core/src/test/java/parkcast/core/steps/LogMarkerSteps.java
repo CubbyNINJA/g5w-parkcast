@@ -44,14 +44,10 @@ public final class LogMarkerSteps {
         });
     }
 
-    @Given("a session starts at {int} ms, but video_set_codec_and_size reports HEVC with an HEVC codec-configuration fixture")
-    public void hevcSession(final int t) {
-        w.scheduler.script(t, VirtualScheduler.AFTER, new Runnable() {
-            @Override
-            public void run() {
-                w.nativeLib.session("h265", 1920, 720);
-            }
-        });
+    @Given("a session starts at {int} ms, and the fake codec throws MediaCodec.CodecException at {int} ms")
+    public void sessionThenCodecError(int t, int errorAt) {
+        w.sessionsAt.add((long) t);
+        w.codecs.errorAt = errorAt;
     }
 
     @Given("the fake codec factory throws java.io.IOException on create, and a session starts at {int} ms")

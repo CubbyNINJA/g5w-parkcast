@@ -69,7 +69,7 @@ public final class NoticeLogSteps {
             if (w.runtime == null) return;
             Frame f = new Frame(nextId++, t);
             ticks.add(new long[] {start, t, f.id});
-            w.runtime.onFrame(f);
+            parkcast.core.CoreSeams.frame(w.runtime, f);
         });
     }
 

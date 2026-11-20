@@ -77,6 +77,7 @@ public final class RunConditionSteps {
 
     @Then("the MirrorSession and VehicleBus doubles recorded zero calls")
     public void sessionAndVehicleUntouched() {
+        StreamSteps.ensureRun(w);
         assertEquals(0, w.g.session.total(), "MirrorSession calls: " + w.g.session.counts);
         assertEquals(0, w.g.vehicle.total(), "VehicleBus calls: " + w.g.vehicle.counts);
     }

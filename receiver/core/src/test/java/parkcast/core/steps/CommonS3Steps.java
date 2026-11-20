@@ -165,7 +165,7 @@ public final class CommonS3Steps {
             w.scheduler.script(t, parkcast.gate.harness.VirtualScheduler.AFTER, new Runnable() {
                 @Override
                 public void run() {
-                    w.nativeLib.session("h264", 1920, 720);
+                    w.nativeLib.session(w.nativeLib.sessionCodec, w.nativeLib.sessionW, w.nativeLib.sessionH);
                 }
             });
         } else {

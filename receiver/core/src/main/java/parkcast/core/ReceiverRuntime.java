@@ -47,8 +47,10 @@ public final class ReceiverRuntime {
             Display display, MirrorSession session, VehicleBus vehicle, int displayWidth, AppFiles files,
             InterfaceQuery ifaces, NativeLibrary nativeLib, NsdWake nsd, CodecFactory codecs, CoverView cover,
             CrashHook crash, String version, String commit, String uxplay) {
-        this.gate = new Receiver(scheduler, park, acc, reverse, windows, logs, config, build, regulation, display,
-                session, vehicle, displayWidth);
+        final CodecDisplay codecDisplay = new CodecDisplay(display, cover);
+        this.codecDisplay = codecDisplay;
+        this.gate = new Receiver(scheduler, park, acc, reverse, windows, logs, config, build, regulation,
+                codecDisplay, session, vehicle, displayWidth);
         this.build = build;
         this.crash = crash;
         this.version = version;
@@ -66,11 +68,12 @@ public final class ReceiverRuntime {
                 g.startFailed(cause);
             }
         };
-        // TODO(phase B: black cover) drive the cover view from the gate's blocking state.
+        // The black cover follows the gate through CodecDisplay (AIR-057(e)).
         DecoderControl decoder = new DecoderControl(codecs, nativeLib, log);
         this.decoder = decoder;
         this.sessions = new SessionLog(log, new NativeLogFilter(files, StartSequence.KEY_FILE));
         decoder.useSessionLog(sessions);
+        decoder.attach(scheduler, codecDisplay, cover, gate);
         Advertiser advertiser = new Advertiser(scheduler, nsd, nativeLib, log);
         this.start = new StartSequence(new HotspotCheck(ifaces), files, nativeLib, advertiser, decoder, log);
         this.stop = new StopSequence(gate, start, advertiser, decoder, nativeLib, log, display, cover);
@@ -154,6 +157,7 @@ public final class ReceiverRuntime {
 
     private final DecoderControl decoder;
     private final SessionLog sessions;
+    private final CodecDisplay codecDisplay;
 
     /** The library's event sink, as the native side calls it. */
     NativeEvents events() {
@@ -169,8 +173,14 @@ public final class ReceiverRuntime {
         gate.record(line);
     }
 
-    /** A decoded frame, delivered on the event thread (AIR-062). */
-    public void onFrame(parkcast.gate.port.Frame f) {
+    /**
+     * A decoded frame from input queued while video was permitted, delivered on the event thread (AIR-062). The
+     * decoder offers its own frames through {@link CodecDisplay}; this entry stands in for it.
+     */
+    // Package-private on purpose: real frames come from DecoderControl; only the test seam (CoreSeams.frame)
+    // calls this, so production code cannot mark a frame fresh without decoding it.
+    void onFrame(parkcast.gate.port.Frame f) {
+        codecDisplay.offer(true);
         gate.onFrame(f);
     }
 }

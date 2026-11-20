@@ -138,6 +138,12 @@ final class WholeAppScan {
         // AIR-082: the manifest only
         rule("android.intent.category.LAUNCHER category", any("launcher", "android\\.intent\\.category\\.LAUNCHER\\b", Kind.MANIFEST));
         rule("android.intent.category.HOME category", any("home", "android\\.intent\\.category\\.HOME\\b", Kind.MANIFEST));
+        // AIR-054(a): no audio output
+        rule("AudioTrack", any("AudioTrack", "\\bAudioTrack\\b", CODE));
+        rule("AudioManager", any("AudioManager", "\\bAudioManager\\b|\\bAUDIO_SERVICE\\b|\"audio\"", CODE));
+        rule("requestAudioFocus", any("requestAudioFocus", "\\brequestAudioFocus\\b", CODE));
+        rule("abandonAudioFocus", any("abandonAudioFocus", "\\babandonAudioFocus\\w*", CODE));
+        rule("AudioFocusRequest", any("AudioFocusRequest", "\\bAudioFocusRequest\\b", CODE));
         // AIR-067(b): S2_GATE.md lines 30-32
         rule(S2_LIST,
                 any("AudioManager", "\\bAudioManager\\b|\\bAUDIO_SERVICE\\b|\"audio\"", CODE),

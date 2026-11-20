@@ -178,4 +178,9 @@ public final class Receiver {
     private static String onOff(boolean on) {
         return on ? "on" : "off";
     }
+
+    /** True while the gate permits video and the receiver has not exited (AIR-057(a)). */
+    public boolean videoPermitted() {
+        return !exited && gate.permitted();
+    }
 }

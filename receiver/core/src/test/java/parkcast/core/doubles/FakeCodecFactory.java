@@ -29,6 +29,10 @@ public final class FakeCodecFactory implements CodecFactory {
             trace.add("codec", "create", name + " threw " + createError.getClass().getName());
             throw createError;
         }
+        if (createThrowsIoe) {
+            trace.add("codec", "create", name + " threw java.io.IOException");
+            throw new java.io.IOException("synthetic codec failure");
+        }
         if (throwOnCreate) {
             trace.add("codec", "create", name + " threw java.lang.IllegalArgumentException");
             throw new IllegalArgumentException("synthetic codec failure");
@@ -41,10 +45,14 @@ public final class FakeCodecFactory implements CodecFactory {
     public final class FakeCodec implements Codec {
         private final Deque<Long> ready = new ArrayDeque<>();
         private int next;
+        /** The surface passed to configure. */
+        public Object surface;
 
         @Override
         public void configure(String mime, int width, int height, Object surface) {
-            trace.add("codec", "configure", mime + " " + width + "x" + height);
+            this.surface = surface;
+            trace.add("codec", "configure", mime + " " + width + "x" + height + " surface=" + surface);
+            if (throwOnConfigure) throw new IllegalStateException("synthetic configure failure");
         }
 
         @Override
@@ -54,6 +62,7 @@ public final class FakeCodecFactory implements CodecFactory {
 
         @Override
         public boolean queue(byte[] au, final long ptsUs) {
+            failIfDue("queue");
             trace.add("codec", "queue", String.valueOf(ptsUs));
             final long due = scheduler.now() + OUTPUT_AFTER_MS;
             scheduler.at(due, () -> ready.add(due));
@@ -62,6 +71,7 @@ public final class FakeCodecFactory implements CodecFactory {
 
         @Override
         public int dequeue() {
+            failIfDue("dequeue");
             if (ready.isEmpty()) return -1;
             ready.poll();
             return next++;
@@ -76,6 +86,30 @@ public final class FakeCodecFactory implements CodecFactory {
         public void release() {
             if (throwOnRelease) throw new IllegalStateException(trace.add("codec", "releaseThrew", "").toString());
             trace.add("codec", "release", "");
+        }
+
+        private void failIfDue(String call) {
+            if (errorAt < 0 || scheduler.now() < errorAt) return;
+            trace.add("codec", call, "threw CodecException");
+            throw new CodecException("synthetic decoder error");
+        }
+    }
+
+    /** create throws java.io.IOException. */
+    public boolean createThrowsIoe;
+    /** configure throws java.lang.IllegalStateException. */
+    public boolean throwOnConfigure;
+    /** From this time on, queue and dequeue throw {@link CodecException}; -1 = never. */
+    public long errorAt = -1;
+    /** Codec-list lookups (MediaCodecList, createDecoderByType); the port offers none, so it stays 0. */
+    public int lookups;
+
+    /** Stands for MediaCodec.CodecException, which extends IllegalStateException. */
+    public static final class CodecException extends IllegalStateException {
+        private static final long serialVersionUID = 1L;
+
+        public CodecException(String m) {
+            super(m);
         }
     }
 

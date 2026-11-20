@@ -40,6 +40,10 @@ public interface NativeLibrary {
 
         /** UxPlay's log level, set once with the callback before {@code raop_init2} (AIR-072(a)). */
         public final String logLevel = "debug";
+        /** The display the receiver advertises in its info (AIR-051(a)): 1920x720 at 60 frames per second. */
+        public final int width = 1920, height = 720, refreshHz = 60;
+        /** HEVC is never offered: no -h265 option and no HEVC feature bit (AIR-052(a)). */
+        public final boolean h265 = false;
     }
 
     /** A stage's outcome: passed or failed, with a token naming the failure or the success. */
