@@ -542,7 +542,7 @@ Feature: The AirPlay receiver's runtime, with doubles
     Given the parking check is on, on a supported build
     And the Park getter replies 1 within 10 ms
     And the UI double throws on add for the first logging-failure notice attempt
-    And every log write fails from 1000 ms
+    And one log write fails at 1000 ms, and later writes succeed
     When the receiver runs for 3000 ms
     Then the failed add is logged
     And mirrored video stays permitted from 10 ms throughout
