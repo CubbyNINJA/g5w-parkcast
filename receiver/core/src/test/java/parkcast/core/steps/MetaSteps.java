@@ -16,12 +16,15 @@ import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import parkcast.core.adapter.LogDirFiles;
+import parkcast.core.adapter.RegulationAdapter;
 import parkcast.core.adapter.ReverseReceiver;
 import parkcast.core.doubles.FakeBroadcasts;
 import parkcast.core.port.Broadcasts;
 import parkcast.core.port.LogDir;
+import parkcast.core.port.RegulationBinder;
 import parkcast.gate.World;
 import parkcast.gate.harness.Fakes;
+import parkcast.gate.port.RegulationSource;
 import parkcast.gate.port.ReverseSource;
 
 /**
@@ -44,6 +47,8 @@ public final class MetaSteps {
     private static int adapterCalls;
     /** Every write, rename and delete the fake file system recorded during the run, as "op path". */
     private static final List<String> fsWrites = new ArrayList<>();
+    /** The transaction number of every call the fake regulation service received during the run, in order. */
+    private static final List<Integer> regulationCalls = new ArrayList<>();
 
     @Given("the scenarios selected by the tag expression {string} are bound to the Android REVERSE_ON receiver adapter driven by a fake broadcast source")
     public void boundToReverse(String tags) {
@@ -55,6 +60,12 @@ public final class MetaSteps {
     public void boundToLogs(String tags) {
         this.tags = tags;
         this.adapter = "logs";
+    }
+
+    @Given("the scenarios selected by the tag expression {string} are bound to the Android regulation adapter backed by a fake com.hkmc.regulation service")
+    public void boundToRegulation(String tags) {
+        this.tags = tags;
+        this.adapter = "regulation";
     }
 
     @When("those scenarios run")
@@ -81,6 +92,7 @@ public final class MetaSteps {
         System.setProperty("parkcast.gate.dir", root.resolve("receiver").resolve("gate").toString());
         adapterCalls = 0;
         fsWrites.clear();
+        regulationCalls.clear();
         bind(adapter);
         try {
             exit = io.cucumber.core.cli.Main.run(args.toArray(new String[0]),
@@ -125,17 +137,33 @@ public final class MetaSteps {
         if (!outside.isEmpty()) throw new AssertionError("written outside " + LOG_DIR + ": " + outside);
     }
 
+    @Then("the fake service recorded no setter call")
+    public void noRegulationSetter() {
+        if (regulationCalls.isEmpty()) throw new AssertionError("the fake regulation service recorded no call at all");
+        for (Integer code : regulationCalls)
+            if (code != RegulationService.GET_STATUS && code != RegulationService.ADD_LISTENER
+                    && code != RegulationService.REMOVE_LISTENER)
+                throw new AssertionError("the fake regulation service received transaction " + code + ": " + regulationCalls);
+        List<String> methods = new ArrayList<>();
+        for (java.lang.reflect.Method m : RegulationBinder.class.getDeclaredMethods()) methods.add(m.getName());
+        java.util.Collections.sort(methods);
+        if (!methods.equals(java.util.Arrays.asList("addListener", "getStatus", "removeListener")))
+            throw new AssertionError("the regulation port offers more than getStatus and the listener calls: " + methods);
+    }
+
     // ------------------------------------------------------------------ bindings
 
     private static void bind(String adapter) {
         if (adapter.equals("reverse")) World.reverseBinding = MetaSteps::reverseAdapter;
         else if (adapter.equals("logs")) World.logsBinding = MetaSteps::logsAdapter;
+        else if (adapter.equals("regulation")) World.regulationBinding = MetaSteps::regulationAdapter;
         else throw new IllegalStateException("unknown adapter " + adapter);
     }
 
     private static void unbind() {
         World.reverseBinding = null;
         World.logsBinding = null;
+        World.regulationBinding = null;
     }
 
     /**
@@ -243,6 +271,105 @@ public final class MetaSteps {
 
     static parkcast.gate.port.LogFiles logsAdapter(Fakes.Logs fake) {
         return new LogDirFiles(new LogFs(fake));
+    }
+
+    /**
+     * A fake com.hkmc.regulation service standing in for IRegulationManager, driven by the gate's regulation
+     * double. getStatus (transaction 1) returns the double's initial state as the stock int (unrestricted or
+     * none: 0, restricted: 1). addListener (6) registers with the double; the state it re-reports during that
+     * registration is swallowed, later states reach the listener as onStatusChanged, and a scripted loss is
+     * delivered as the binder dying. removeListener (7) unregisters. Every call is recorded by number.
+     */
+    static final class RegulationService implements RegulationBinder {
+        static final int GET_STATUS = 1, ADD_LISTENER = 6, REMOVE_LISTENER = 7;
+        private final Fakes.Regulation fake;
+        private Listener live;
+
+        RegulationService(Fakes.Regulation fake) {
+            this.fake = fake;
+        }
+
+        private static int code(String state) {
+            if (state == null || state.equals("unrestricted")) return 0;
+            if (state.equals("restricted")) return 1;
+            throw new AssertionError("no stock status for regulation state " + state);
+        }
+
+        @Override
+        public int getStatus() {
+            adapterCalls++;
+            regulationCalls.add(GET_STATUS);
+            return code(fake.initial);
+        }
+
+        @Override
+        public void addListener(final Listener l) {
+            adapterCalls++;
+            regulationCalls.add(ADD_LISTENER);
+            live = l;
+            final boolean[] registering = {true};
+            fake.register(new RegulationSource.RegulationListener() {
+                @Override
+                public void state(String s) {
+                    if (registering[0] || live != l) return;
+                    l.onStatusChanged(code(s));
+                }
+
+                @Override
+                public void unavailable(String reason) {
+                    if (live != l) return;
+                    live = null;
+                    l.onServiceLost();
+                }
+            });
+            registering[0] = false;
+        }
+
+        @Override
+        public void removeListener(Listener l) {
+            adapterCalls++;
+            regulationCalls.add(REMOVE_LISTENER);
+            if (live == l) live = null;
+            fake.unregister();
+        }
+    }
+
+    /**
+     * Maps the adapter's stock words to S2's (OD-195 has the adapter say "on" and "off"; the S2 scenarios
+     * expect "restricted" and "unrestricted"). Any other word fails the run instead of passing through.
+     */
+    static final class S2Words implements RegulationSource {
+        private final RegulationSource inner;
+
+        S2Words(RegulationSource inner) {
+            this.inner = inner;
+        }
+
+        @Override
+        public void register(final RegulationListener l) {
+            inner.register(new RegulationListener() {
+                @Override
+                public void state(String s) {
+                    if ("on".equals(s)) l.state("restricted");
+                    else if ("off".equals(s)) l.state("unrestricted");
+                    else throw new AssertionError("the regulation adapter reported state " + s);
+                }
+
+                @Override
+                public void unavailable(String reason) {
+                    l.unavailable(reason);
+                }
+            });
+        }
+
+        @Override
+        public void unregister() {
+            inner.unregister();
+        }
+    }
+
+    static RegulationSource regulationAdapter(Fakes.Regulation fake) {
+        return new S2Words(new RegulationAdapter(new RegulationService(fake)));
     }
 
     // ------------------------------------------------------------------ paths
