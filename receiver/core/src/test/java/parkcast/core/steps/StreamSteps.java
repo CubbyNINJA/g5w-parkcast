@@ -6,11 +6,14 @@ import static parkcast.core.steps.Check.assertTrue;
 
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
+import io.cucumber.java.en.When;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 import parkcast.gate.harness.Fakes;
 import parkcast.core.doubles.BlackCover;
 import parkcast.core.doubles.Trace;
+import parkcast.gate.harness.VirtualScheduler;
 
 /** File 13 AIR-051 and AIR-055 to AIR-057 steps on the Java side: sessions, the decoder, the cover and the gate. */
 public final class StreamSteps {
@@ -170,5 +173,224 @@ public final class StreamSteps {
         for (Trace.Entry e : w.trace.current("native", "session")) if (e.details.startsWith("ended ")) ended = true;
         assertTrue(ended, "the session was not ended: " + w.trace.current("native", null));
         assertFalse(w.nativeLib.sessionOpen(), "a session is still open");
+    }
+
+    // ---- Callbacks after stop (AIR-055) ----
+
+    /** The seq of the last library stop call; later trace entries came after stop returned. */
+    private int stopSeq = -1;
+
+    @When("the library double calls video_process with an access unit {int} ms after stop returns")
+    public void callbackAfterStop(int after) {
+        if (!w.started || w.ranUntil <= 0) w.runFor(w.g.settleMs);
+        List<Trace.Entry> stops = w.trace.current("native", "stop");
+        assertFalse(stops.isEmpty(), "stop was never called");
+        Trace.Entry last = stops.get(stops.size() - 1);
+        stopSeq = last.seq;
+        long at = Math.max(last.t, w.ranUntil) + after;
+        w.scheduler.script(at, VirtualScheduler.AFTER, () -> w.nativeLib.callback("video_process"));
+        w.runFor(at + 1000);
+    }
+
+    @Then("no native event reached Java after stop returned")
+    public void noEventAfterStop() {
+        for (Trace.Entry e : w.trace.current("java", "event")) assertTrue(e.seq < stopSeq, "event after stop: " + e);
+        boolean dropped = false;
+        for (Trace.Entry e : w.trace.current("native", "callback"))
+            if (e.seq > stopSeq && e.details.equals("video_process dropped")) dropped = true;
+        assertTrue(dropped, "the late callback was never made: " + w.trace.current("native", "callback"));
+    }
+
+    @Then("no input was queued to the fake codec after stop returned")
+    public void noQueueAfterStop() {
+        for (Trace.Entry e : w.trace.current("codec", "queue")) assertTrue(e.seq < stopSeq, "queued after stop: " + e);
+    }
+
+    // ---- Decoder faults (AIR-056) ----
+
+    @Given("^the fake codec (factory throws java\\.io\\.IOException on create|throws IllegalStateException on configure)$")
+    public void codecFault(String fault) {
+        if (fault.startsWith("factory")) w.codecs.createThrowsIoe = true;
+        else w.codecs.throwOnConfigure = true;
+    }
+
+    @Then("the fake codec factory recorded no other create call")
+    public void noOtherCreate() {
+        ensureRun(w);
+        assertEquals(1, w.trace.current("codec", "create").size(), "create calls " + w.trace.current("codec", "create"));
+    }
+
+    @Then("no output buffer was released with render true, and the screen is black throughout")
+    public void noRenderAndBlack() {
+        ensureRun(w);
+        for (Trace.Entry e : w.trace.current("codec", "releaseOutput"))
+            assertFalse(e.details.endsWith("render=true"), "rendered: " + e);
+        for (Trace.Entry e : w.trace.current("cover", "black")) assertEquals("on", e.details, "cover " + e);
+    }
+
+    @Given("the fake codec throws MediaCodec.CodecException at {int} ms")
+    public void codecErrorAt(int ms) {
+        w.codecs.errorAt = ms;
+    }
+
+    @Then("the fake codec was released")
+    public void codecReleased() {
+        ensureRun(w);
+        assertFalse(w.trace.current("codec", "release").isEmpty(), "the codec was not released");
+    }
+
+    @Then("the fake codec factory recorded no create call after {int} ms")
+    public void noCreateAfter(int ms) {
+        ensureRun(w);
+        for (Trace.Entry e : w.trace.current("codec", "create")) assertTrue(e.t <= ms, "create at " + e.t);
+    }
+
+    @Then("no notice add call was made and no notice is held")
+    public void noNoticeHeld() {
+        ensureRun(w);
+        List<Fakes.Op> adds = w.g.notices.ops("add", null, w.startIndex());
+        assertTrue(adds.isEmpty(), "notice adds: " + adds.size());
+        for (Fakes.Window win : w.g.notices.windows)
+            assertFalse(win.start == w.startIndex() && win.removedAt < 0, "notice held: " + win.kind());
+    }
+
+    // ---- The gate drives rendering (AIR-057) ----
+
+    /** The Park getter call whose return the "released after it returned" step refers to. */
+    private long anchorBegin = -1;
+
+    /** Scripted only; the next run or Then step runs it. The gate glue is not loaded in core. */
+    @Given("the car leaves Park at {int} ms")
+    public void leavesPark(int out) {
+        w.start();
+        w.scheduler.script(out, VirtualScheduler.BEFORE, () -> w.g.park.gear = 0);
+    }
+
+    @Given("the car leaves Park at {int} ms and returns to Park at {int} ms")
+    public void leavesAndReturns(int out, int back) {
+        leavesPark(out);
+        w.scheduler.script(back, VirtualScheduler.BEFORE, () -> w.g.park.gear = 1);
+    }
+
+    @Then("every output buffer released before the Park getter call started at {int} ms returned was released with render true")
+    public void renderedBeforeReturn(int begin) {
+        long end = returnOf(begin);
+        int n = 0;
+        for (Trace.Entry e : w.trace.current("codec", "releaseOutput"))
+            if (e.t < end) {
+                n++;
+                assertTrue(e.details.endsWith("render=true"), "released at " + e.t + ": " + e.details);
+            }
+        assertTrue(n > 0, "nothing was released before " + end + " ms");
+        anchorBegin = begin;
+    }
+
+    @Then("every output buffer released after it returned was released with render false")
+    public void notRenderedAfterReturn() {
+        long end = returnOf(anchorBegin);
+        int n = 0;
+        for (Trace.Entry e : w.trace.current("codec", "releaseOutput"))
+            if (e.t > end) {
+                n++;
+                assertTrue(e.details.endsWith("render=false"), "released at " + e.t + ": " + e.details);
+            }
+        assertTrue(n > 0, "nothing was released after " + end + " ms");
+    }
+
+    @Then("the black cover was showing from no later than {int} ms")
+    public void coverBy(int ms) {
+        ensureRun(w);
+        assertTrue(coverOnAt(ms), "the cover was down at " + ms + " ms: " + w.trace.current("cover", "black"));
+    }
+
+    @Then("the screen is black from {int} ms to {int} ms")
+    public void blackBetween(int from, int to) {
+        ensureRun(w);
+        assertTrue(coverOnAt(from), "the cover was down at " + from + " ms");
+        for (Trace.Entry e : w.trace.current("cover", "black"))
+            assertFalse(e.t > from && e.t <= to && e.details.equals("off"), "cover lowered at " + e.t);
+        for (Trace.Entry e : w.trace.current("codec", "releaseOutput"))
+            assertFalse(e.t >= from && e.t <= to && e.details.endsWith("render=true"), "rendered at " + e.t);
+    }
+
+    @Then("the fake codec released an output buffer for every access unit queued from {int} ms to {int} ms, each with render false")
+    public void drainedWithoutRender(int from, int to) {
+        ensureRun(w);
+        List<Trace.Entry> queued = queued();
+        List<Trace.Entry> released = w.trace.current("codec", "releaseOutput");
+        int n = 0;
+        for (int i = 0; i < queued.size(); i++) {
+            Trace.Entry q = queued.get(i);
+            if (q.t < from || q.t > to) continue;
+            n++;
+            Trace.Entry r = releaseOf(released, i);
+            assertTrue(r != null, "no output released for the unit queued at " + q.t + " ms");
+            assertTrue(r.details.endsWith("render=false"), "unit queued at " + q.t + ": " + r.details);
+        }
+        assertTrue(n > 0, "nothing was queued from " + from + " to " + to + " ms");
+    }
+
+    @Then("the first output buffer released with render true after the gate next permits video came from an access unit queued after the gate permitted video")
+    public void firstRenderIsFresh() {
+        ensureRun(w);
+        long blockedAt = -1, permittedAt = -1;
+        for (Fakes.Line l : w.lines()) {
+            String b = S3World.body(l);
+            if (blockedAt < 0 && b.startsWith("gate transition prev=permitted new=blocked")) blockedAt = l.t;
+            else if (blockedAt >= 0 && permittedAt < 0 && b.startsWith("gate transition prev=blocked new=permitted"))
+                permittedAt = l.t;
+        }
+        assertTrue(permittedAt >= 0, "the gate never permitted video again: " + w.bodies());
+        List<Trace.Entry> queued = queued();
+        Trace.Entry first = null;
+        for (Trace.Entry r : w.trace.current("codec", "releaseOutput"))
+            if (first == null && r.t >= permittedAt && r.details.endsWith("render=true")) first = r;
+        assertTrue(first != null, "nothing was rendered after " + permittedAt + " ms");
+        int index = Integer.parseInt(first.details.substring(0, first.details.indexOf(' ')));
+        assertTrue(index < queued.size(), "no unit for output " + index);
+        assertTrue(queued.get(index).t >= permittedAt, "rendered a unit queued at " + queued.get(index).t
+                + " ms, before video was permitted at " + permittedAt + " ms");
+    }
+
+    @Then("the library double saw the connection kept, with no close, from {int} ms to {int} ms")
+    public void connectionKept(int from, int to) {
+        ensureRun(w);
+        for (Trace.Entry e : w.trace.current("socket", "close")) assertFalse(e.t >= from && e.t <= to, "closed: " + e);
+        for (Trace.Entry e : w.trace.current("native", "stop")) assertFalse(e.t >= from && e.t <= to, "stopped: " + e);
+        for (Trace.Entry e : w.trace.current("native", "session"))
+            assertFalse(e.t >= from && e.t <= to && e.details.startsWith("ended "), "session ended: " + e);
+    }
+
+    @Then("the MirrorSession and VehicleBus doubles recorded zero calls")
+    public void noSessionOrVehicleCalls() {
+        ensureRun(w);
+        assertEquals(0, w.g.session.total(), "MirrorSession calls " + w.g.session.counts);
+        assertEquals(0, w.g.vehicle.total(), "VehicleBus calls " + w.g.vehicle.counts);
+    }
+
+    private long returnOf(long begin) {
+        ensureRun(w);
+        Fakes.Call c = w.g.callAt(begin);
+        assertTrue(c.done, "the call started at " + begin + " ms never returned");
+        return c.end;
+    }
+
+    /** Whether the cover was up at {@code ms}; it starts up before any change. */
+    private boolean coverOnAt(long ms) {
+        String state = "on";
+        for (Trace.Entry e : w.trace.current("cover", "black")) if (e.t <= ms) state = e.details;
+        return state.equals("on");
+    }
+
+    /** Units the fake codec accepted, in queue order (output index i belongs to the i-th). */
+    private List<Trace.Entry> queued() {
+        List<Trace.Entry> out = new ArrayList<>();
+        for (Trace.Entry e : w.trace.current("codec", "queue")) if (!e.details.startsWith("threw")) out.add(e);
+        return out;
+    }
+
+    private static Trace.Entry releaseOf(List<Trace.Entry> released, int index) {
+        for (Trace.Entry r : released) if (r.details.startsWith(index + " ")) return r;
+        return null;
     }
 }
