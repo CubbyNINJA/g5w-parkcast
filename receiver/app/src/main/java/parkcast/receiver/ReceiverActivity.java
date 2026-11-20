@@ -31,7 +31,7 @@ public final class ReceiverActivity extends Activity {
         threads = new AndroidThreads(main);
         AndroidBroadcasts broadcasts = new AndroidBroadcasts(this, main);
         final ReceiverRuntime[] self = new ReceiverRuntime[1];
-        ParkCall park = new ParkCall(scheduler, threads, new AndroidGearSource(), new ParkCall.Sink() {
+        ParkCall park = new ParkCall(scheduler, threads, new AndroidGearSource(this), new ParkCall.Sink() {
             @Override
             public void record(String line) {
                 if (self[0] != null) self[0].record(line);
