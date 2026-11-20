@@ -45,8 +45,9 @@ public final class ReceiverRuntime {
             Display display, MirrorSession session, VehicleBus vehicle, int displayWidth, AppFiles files,
             InterfaceQuery ifaces, NativeLibrary nativeLib, NsdWake nsd, CodecFactory codecs, CoverView cover,
             CrashHook crash, String version, String commit, String uxplay) {
-        this.gate = new Receiver(scheduler, park, acc, reverse, windows, logs, config, build, regulation, display,
-                session, vehicle, displayWidth);
+        final CodecDisplay codecDisplay = new CodecDisplay(display, cover);
+        this.gate = new Receiver(scheduler, park, acc, reverse, windows, logs, config, build, regulation,
+                codecDisplay, session, vehicle, displayWidth);
         this.build = build;
         this.crash = crash;
         this.version = version;
@@ -64,8 +65,9 @@ public final class ReceiverRuntime {
                 g.startFailed(cause);
             }
         };
-        // TODO(phase B: black cover) drive the cover view from the gate's blocking state.
+        // The black cover follows the gate through CodecDisplay (AIR-057(e)).
         DecoderControl decoder = new DecoderControl(codecs, nativeLib, log);
+        decoder.attach(scheduler, codecDisplay, cover, gate);
         Advertiser advertiser = new Advertiser(scheduler, nsd, nativeLib, log);
         this.start = new StartSequence(new HotspotCheck(ifaces), files, nativeLib, advertiser, decoder, log);
         this.stop = new StopSequence(gate, start, advertiser, decoder, nativeLib, log);

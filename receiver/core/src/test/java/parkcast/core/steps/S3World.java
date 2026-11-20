@@ -73,7 +73,7 @@ public final class S3World {
             final boolean gain = c[1] == 1;
             scheduler.script(c[0], VirtualScheduler.AFTER, () -> r.onWindowFocusChanged(gain));
         }
-        for (Long at : sessionsAt) scheduler.script(at, VirtualScheduler.AFTER, () -> nativeLib.session("h264", 1920, 720));
+        for (Long at : sessionsAt) scheduler.script(at, VirtualScheduler.AFTER, () -> nativeLib.session(nativeLib.sessionCodec, nativeLib.sessionW, nativeLib.sessionH));
         scheduler.runUntil(0);
         ranUntil = 0;
     }
@@ -132,5 +132,9 @@ public final class S3World {
         seededKey = bytes.clone();
         seededMode = FakeNativeLibrary.KEY_MODE;
         fs.seed(KEY_PATH, bytes, seededMode);
+    }
+
+    {
+        nativeLib.scheduler = scheduler;
     }
 }

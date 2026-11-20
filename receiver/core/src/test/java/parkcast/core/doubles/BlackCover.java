@@ -16,4 +16,22 @@ public final class BlackCover implements CoverView {
         black = on;
         trace.add("cover", "black", on ? "on" : "off");
     }
+
+    /** Stands for the receiver activity's own Surface (AIR-056(b)). */
+    public static final Object SURFACE = new Object() {
+        @Override
+        public String toString() {
+            return "activity-surface";
+        }
+    };
+
+    @Override
+    public void videoBox(int x, int y, int width, int height) {
+        trace.add("cover", "videoBox", width + "x" + height + " at " + x + "," + y);
+    }
+
+    @Override
+    public Object surface() {
+        return SURFACE;
+    }
 }
