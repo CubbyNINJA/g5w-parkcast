@@ -48,7 +48,19 @@ final class DecoderControl implements NativeEvents {
             refuseHevc();
             return;
         }
-        if (failed || codec != null) return;
+        if (failed) return;
+        if (codec != null) {
+            if (generation == codecGen) return;
+            // An earlier session's decoder: a new session gets its own, as the first did (OD-196).
+            Codec old = codec;
+            codec = null;
+            pending.clear();
+            try {
+                old.release();
+            } catch (Exception ignored) {
+                // That session is over; the new decoder below is what counts.
+            }
+        }
         try {
             codec = codecs.create(DECODER);
         } catch (Exception e) {

@@ -246,6 +246,15 @@ public final class StreamSteps {
         for (Trace.Entry e : w.trace.current("codec", "create")) assertTrue(e.t <= ms, "create at " + e.t);
     }
 
+    @Then("the fake codec released an output buffer with render true after {int} ms")
+    public void renderedAfter(int ms) {
+        ensureRun(w);
+        for (Trace.Entry e : w.trace.current("codec", "releaseOutput"))
+            if (e.t > ms && e.details.endsWith("render=true")) return;
+        throw new AssertionError("nothing was rendered after " + ms + " ms: " + w.trace.current("codec", "releaseOutput").size()
+                + " releases; creates " + w.trace.current("codec", "create"));
+    }
+
     @Then("no notice add call was made and no notice is held")
     public void noNoticeHeld() {
         ensureRun(w);

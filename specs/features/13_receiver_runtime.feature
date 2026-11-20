@@ -429,6 +429,14 @@ Feature: The AirPlay receiver's runtime, with doubles
     And the screen is black from 3000 ms to 20000 ms
     And no notice add call was made and no notice is held
 
+  @offline @normal @AIR-056 @AT-56 @OD-150 @OD-196
+  Scenario: A second session in the same app start decodes like the first
+    Given a session starts at 1000 ms, and the library double reports at 3000 ms that the iPhone ended the connection
+    And a session starts at 5000 ms
+    When the receiver runs for 8000 ms
+    Then the fake codec released an output buffer with render true after 5000 ms
+    And the log has "session 2 first frame rendered"
+
   @offline @normal @AIR-057 @AT-57 @OD-150 @OD-158
   Scenario: While the gate blocks, every buffer is released without render and the cover is shown
     Given a session starts at 500 ms
