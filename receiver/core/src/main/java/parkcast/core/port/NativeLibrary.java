@@ -37,6 +37,9 @@ public interface NativeLibrary {
             this.keyfile = keyfile;
             this.address = address;
         }
+
+        /** UxPlay's log level, set once with the callback before {@code raop_init2} (AIR-072(a)). */
+        public final String logLevel = "debug";
     }
 
     /** A stage's outcome: passed or failed, with a token naming the failure or the success. */

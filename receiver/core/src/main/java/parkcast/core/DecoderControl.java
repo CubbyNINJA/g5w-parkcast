@@ -31,17 +31,24 @@ final class DecoderControl implements NativeEvents {
     @Override
     public void sessionStarted(int generation) {
         if (stopped) return;
-        // TODO(phase B: session records) log the session start with its generation (AIR-071).
+        if (sessions != null) sessions.started();
     }
 
     @Override
     public void codecConfig(int generation, String codecName, int width, int height) {
+        if (stopped) return;
+        if (sessions != null) sessions.codec(codecName, width, height);
+        if ("h265".equals(codecName)) {
+            refuseHevc();
+            return;
+        }
         if (stopped || failed || codec != null) return;
         try {
             codec = codecs.create(DECODER);
         } catch (Exception e) {
             failed = true;
             log.record(UNAVAILABLE + " " + e.getClass().getName());
+            if (sessions != null) sessions.end(UNAVAILABLE);
             nativeLib.stop(NativeLibrary.Phase.SESSION);
             log.startFailed(UNAVAILABLE);
             return;
@@ -58,7 +65,7 @@ final class DecoderControl implements NativeEvents {
     @Override
     public void sessionEnded(int generation) {
         if (stopped) return;
-        // TODO(phase B: session records) log the session end and the withheld count.
+        if (sessions != null) sessions.end("iphone disconnected");
     }
 
     @Override
@@ -70,11 +77,12 @@ final class DecoderControl implements NativeEvents {
     @Override
     public void log(int generation, String record) {
         if (stopped) return;
-        // TODO(phase B: native records) filter against the allowlist and withhold key material (AIR-073, AIR-083).
+        if (sessions != null) sessions.nativeRecord(record);
     }
 
     /** Exit: drop every later event. */
     void stop() {
+        if (!stopped && sessions != null) sessions.end("stop");
         stopped = true;
     }
 
@@ -86,4 +94,26 @@ final class DecoderControl implements NativeEvents {
         c.release();
         return true;
     }
+
+    /** The session records and native-record filter (AIR-071, AIR-073); set once, before the start runs. */
+    private SessionLog sessions;
+
+    void useSessionLog(SessionLog s) {
+        sessions = s;
+    }
+
+    @Override
+    public void connectionAccepted(int generation, String model) {
+        if (stopped) return;
+        if (sessions != null) sessions.accepted(model);
+    }
+
+    /** AIR-052(b): an HEVC stream never reaches the decoder; the session ends. */
+    private void refuseHevc() {
+        log.record(HEVC_REFUSED);
+        if (sessions != null) sessions.end(HEVC_REFUSED);
+        nativeLib.stop(NativeLibrary.Phase.SESSION);
+    }
+
+    static final String HEVC_REFUSED = "hevc refused";
 }

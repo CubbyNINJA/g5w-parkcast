@@ -82,6 +82,8 @@ public final class FakeNativeLibrary implements NativeLibrary {
         }
         trace.add("stdio", "dup2", "fd 1,2 -> /dev/null");
         trace.add("native", "raop_init", "");
+        trace.add("native", "raop_set_log_callback", "");
+        trace.add("native", "raop_set_log_level", plan.logLevel);
         trace.add("native", "raop_init2", "keyfile=" + plan.keyfile);
         try {
             if (!fs.files.containsKey(plan.keyfile)) {
@@ -123,6 +125,8 @@ public final class FakeNativeLibrary implements NativeLibrary {
         generation++;
         trace.add("native", "session", "gen=" + generation);
         events.sessionStarted(generation);
+        events.connectionAccepted(generation, model);
+        if (afterAccept != null) deliverLog(afterAccept);
         events.codecConfig(generation, codec, w, h);
     }
 
@@ -211,4 +215,23 @@ public final class FakeNativeLibrary implements NativeLibrary {
 
     /** Stop phases whose call throws java.lang.IllegalStateException before doing anything. */
     public final Set<Phase> stopThrows = new HashSet<>();
+
+    /** One native log record from UxPlay's callback, for the open session; dropped before ACCEPT. */
+    public void deliverLog(String record) {
+        if (events == null) return;
+        trace.add("native", "log", "gen=" + generation);
+        events.log(generation, record);
+    }
+
+    /** "The iPhone ended the connection": the open session ends. */
+    public void disconnect() {
+        if (events == null || generation == 0) return;
+        trace.add("native", "session end", "gen=" + generation);
+        events.sessionEnded(generation);
+    }
+
+    /** The model identifier the double reports with an accepted connection (synthetic). */
+    public String model = "iPhone15,2";
+    /** A record delivered after the accepted connection and before video_set_codec_and_size; null for none. */
+    public String afterAccept;
 }

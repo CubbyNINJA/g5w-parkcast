@@ -174,9 +174,9 @@ public final class CommonS3Steps {
     }
 
     @When("the receiver runs for {int} ms and then exit\\() is called")
-    public void runsThenExit(int ms) {
+    public void runsForThenExit(int ms) {
+        w.exitAt(ms);
         w.runFor(ms);
-        w.runtime.exit();
     }
 
     /** Park is gear 1 in the gate's park double; leaving Park sets it to 0 (as the gate's own step does). */

@@ -5,6 +5,7 @@ import parkcast.core.port.CodecFactory;
 import parkcast.core.port.CoverView;
 import parkcast.core.port.CrashHook;
 import parkcast.core.port.InterfaceQuery;
+import parkcast.core.port.NativeEvents;
 import parkcast.core.port.NativeLibrary;
 import parkcast.core.port.NsdWake;
 import parkcast.core.port.ProcNetTcp;
@@ -67,6 +68,9 @@ public final class ReceiverRuntime {
         };
         // TODO(phase B: black cover) drive the cover view from the gate's blocking state.
         DecoderControl decoder = new DecoderControl(codecs, nativeLib, log);
+        this.decoder = decoder;
+        this.sessions = new SessionLog(log, new NativeLogFilter(files, StartSequence.KEY_FILE));
+        decoder.useSessionLog(sessions);
         Advertiser advertiser = new Advertiser(scheduler, nsd, nativeLib, log);
         this.start = new StartSequence(new HotspotCheck(ifaces), files, nativeLib, advertiser, decoder, log);
         this.stop = new StopSequence(gate, start, advertiser, decoder, nativeLib, log, display, cover);
@@ -88,6 +92,7 @@ public final class ReceiverRuntime {
             }
         });
         gate.onCreate();
+        sessions.filterReady();
         try {
             start.run();
         } catch (RuntimeException e) {
@@ -113,7 +118,13 @@ public final class ReceiverRuntime {
         stop.run(StopSequence.OWNER_EXIT);
     }
 
-    /** onDestroy without an owner exit runs the stop steps with reason=destroy; after exit() it does nothing. */
+    public void onPause() {
+    }
+
+    public void onStop() {
+    }
+
+    /** The system destroys the activity: the stop steps run once, with reason=destroy, unless exit ran them. */
     public void onDestroy() {
         stop.run(StopSequence.DESTROY);
     }
@@ -138,5 +149,17 @@ public final class ReceiverRuntime {
     /** Wires the CarPlay listener check over {@code /proc/net/tcp} (AIR-079(b) to (d)). */
     public void useProcNetTcp(ProcNetTcp p) {
         start.useCarplayProbe(new CarplayProbe(p, log));
+    }
+
+    private final DecoderControl decoder;
+    private final SessionLog sessions;
+
+    /** The library's event sink, as the native side calls it. */
+    NativeEvents events() {
+        return decoder;
+    }
+
+    SessionLog sessionLog() {
+        return sessions;
     }
 }

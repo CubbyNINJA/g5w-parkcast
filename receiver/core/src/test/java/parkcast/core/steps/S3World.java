@@ -64,6 +64,7 @@ public final class S3World {
         final ReceiverRuntime r = build();
         runtime = r;
         r.useProcNetTcp(procNetTcp);
+        if (beforeCreate != null) beforeCreate.accept(r);
         final boolean inLifecycle = focusAt == 0;
         scheduler.script(0, VirtualScheduler.FIRST, () -> {
             r.onCreate();
@@ -140,4 +141,6 @@ public final class S3World {
     {
         trace.log = g.logs.lines;
     }
+    /** Runs on the new runtime before onCreate, for steps that act before the filter is ready. */
+    public java.util.function.Consumer<ReceiverRuntime> beforeCreate;
 }
