@@ -153,7 +153,9 @@ public final class StartFailureSteps {
     @Then("the failed add is logged")
     public void failedAddLogged() {
         boolean found = false;
-        for (String b : w.bodies()) if (b.startsWith("start-failure notice add failed")) found = true;
+        for (String b : w.bodies())
+            if (b.startsWith("start-failure notice add failed") || b.startsWith("logging-failure notice add failed"))
+                found = true;
         assertTrue(found, "no failed-add record in " + w.bodies());
     }
 

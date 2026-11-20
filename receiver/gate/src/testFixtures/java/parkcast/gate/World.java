@@ -2,9 +2,12 @@ package parkcast.gate;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 import parkcast.gate.harness.Fakes;
 import parkcast.gate.harness.FrameSource;
 import parkcast.gate.harness.VirtualScheduler;
+import parkcast.gate.port.LogFiles;
+import parkcast.gate.port.ReverseSource;
 
 /**
  * State shared by every step class of one scenario (injected by cucumber-picocontainer): the doubles, the
@@ -26,6 +29,36 @@ public final class World {
     public final Fakes.Regulation regulation = new Fakes.Regulation();
     public final Fakes.Reverse reverse = new Fakes.Reverse();
     public final FrameSource frames = new FrameSource(scheduler);
+
+    /**
+     * Test-only binding seam (OD-189, the meta profile): while set, the receiver's REVERSE_ON source is this
+     * function of {@link #reverse}, so receiver/core can rerun these scenarios against its Android adapter. Null
+     * (the default) hands the receiver {@link #reverse} itself.
+     */
+    public static Function<Fakes.Reverse, ReverseSource> reverseBinding;
+    private ReverseSource boundReverse;
+
+    /** The REVERSE_ON source the receiver registers with: {@link #reverse}, or its binding while one is set. */
+    public ReverseSource reverseSource() {
+        if (reverseBinding == null) return reverse;
+        if (boundReverse == null) boundReverse = reverseBinding.apply(reverse);
+        return boundReverse;
+    }
+
+    /**
+     * Test-only binding seam (OD-189, the meta profile): while set, the receiver's log folder is this function of
+     * {@link #logs}, so receiver/core can rerun these scenarios against its Android LogFiles adapter. Null (the
+     * default) hands the receiver {@link #logs} itself.
+     */
+    public static Function<Fakes.Logs, LogFiles> logsBinding;
+    private LogFiles boundLogs;
+
+    /** The log folder the receiver writes to: {@link #logs}, or its binding while one is set. */
+    public LogFiles logFiles() {
+        if (logsBinding == null) return logs;
+        if (boundLogs == null) boundLogs = logsBinding.apply(logs);
+        return boundLogs;
+    }
 
     /** Display width handed to the receiver (the head unit's 1280 px wide screen). */
     public int displayWidth = 1280;
@@ -56,7 +89,7 @@ public final class World {
     public void start() {
         if (started) return;
         started = true;
-        final Receiver r = new Receiver(scheduler, park, acc, reverse, notices, logs, config, build, regulation,
+        final Receiver r = new Receiver(scheduler, park, acc, reverseSource(), notices, logFiles(), config, build, regulation,
                 screen, session, vehicle, displayWidth);
         receiver = r;
         final long focus = focusAt;
@@ -221,7 +254,7 @@ public final class World {
         byte[] b = new byte[(int) n];
         java.util.Arrays.fill(b, (byte) 'x');
         b[b.length - 1] = (byte) '\n';
-        if (sizeLog == null) sizeLog = new GateLog(logs, scheduler);
+        if (sizeLog == null) sizeLog = new GateLog(logFiles(), scheduler);
         sizeLog.put(b);
     }
 }

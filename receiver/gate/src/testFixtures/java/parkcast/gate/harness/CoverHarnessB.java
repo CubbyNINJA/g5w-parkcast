@@ -60,13 +60,13 @@ public final class CoverHarnessB {
         return out;
     }
 
-    /** Records each registration call, then passes it to {@link World#reverse}. */
+    /** Records each registration call, then passes it to {@link World#reverseSource()} ({@link World#reverse} unless a binding is set). */
     private final ReverseSource recording = new ReverseSource() {
         @Override
         public boolean register(ReverseListener l) {
             boolean got;
             try {
-                got = w.reverse.register(l);
+                got = w.reverseSource().register(l);
             } catch (RuntimeException e) {
                 record("register threw");
                 throw e;
@@ -77,7 +77,7 @@ public final class CoverHarnessB {
 
         @Override
         public void unregister() {
-            w.reverse.unregister();
+            w.reverseSource().unregister();
             record("unregister");
             if (unregisterThrows) throw new IllegalStateException("synthetic REVERSE_ON unregister failure");
         }

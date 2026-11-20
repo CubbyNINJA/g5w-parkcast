@@ -21,7 +21,9 @@ import parkcast.gate.port.WindowSpec;
  * one removal call per window still on screen and drops every held attempt and waiting retry.
  *
  * <p>Nothing here changes the gate, the flag value, polling, registration, audio or the iPhone connection,
- * and nothing here writes a record: a notice that fails to show or to be removed is not a logging failure.
+ * and nothing here writes a record: a notice that fails to show or to be removed is not a logging failure. The
+ * S3 runtime opts in to one record per failed attempt ({@link #logAddFailures}, AIR-061(b)); that record is not
+ * a logging failure either.
  */
 public final class Notices {
     /** The registration-failure notice's text (AIR-019(i)). */
@@ -46,6 +48,8 @@ public final class Notices {
     private final StartFailureNotice startFailure = new StartFailureNotice();
     /** Where a failed start-failure notice add is recorded; absent for the S2 gate on its own. */
     private GateLog log;
+    /** Failed registration- and logging-failure notice attempts are recorded too; off for the S2 gate. */
+    private boolean logAddFailures;
 
     /** Covered from process start until the first focus gain (AIR-041(a)). */
     private boolean covered = true;
@@ -80,6 +84,14 @@ public final class Notices {
     /** Gives the start-failure notice a log for its failed-add record (AIR-061(b)). */
     public void setLog(GateLog log) {
         this.log = log;
+    }
+
+    /**
+     * Records each failed registration-failure or logging-failure notice attempt through the log given to
+     * {@link #setLog} (AIR-061(b)). The S2 gate on its own keeps these silent; the S3 runtime turns this on.
+     */
+    public void logAddFailures() {
+        this.logAddFailures = true;
     }
 
     /** The receiver became covered: hold attempts and remove windows on screen at once (AIR-041(b), (c)). */
@@ -284,7 +296,7 @@ public final class Notices {
                 NoticeView toast = windows.create(REGISTRATION_TEXT);
                 Placement p = windows.placementFrom(toast);
                 if (p == null) {
-                    failed(n);
+                    failed(n, "placement missing");
                     return;
                 }
                 int gravity = p.gravity;
@@ -297,7 +309,7 @@ public final class Notices {
                 if (raised) {
                     int h = windows.measure(toast, displayWidth);
                     if (h <= 0) {
-                        failed(n);
+                        failed(n, "height " + h);
                         return;
                     }
                     y += h;
@@ -305,14 +317,17 @@ public final class Notices {
                 added = windows.add(view, new WindowSpec(WindowSpec.TYPE_TOAST,
                         WindowSpec.FLAG_NOT_FOCUSABLE | WindowSpec.FLAG_NOT_TOUCHABLE, gravity, x, y));
             } catch (RuntimeException e) {
-                failed(n);
+                failed(n, e.getClass().getName());
                 return;
             }
             shown(added);
         }
 
         /** A first attempt that fails is retried once, 5,000 ms later; a failed retry gives the notice up. */
-        private void failed(int n) {
+        private void failed(int n, String why) {
+            if (logAddFailures && log != null) {
+                log.record((raised ? "logging-failure" : "registration-failure") + " notice add failed " + why);
+            }
             if (n != 1) return;
             retryTask = after(RETRY_MS, new Runnable() {
                 @Override

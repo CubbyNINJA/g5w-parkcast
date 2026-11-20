@@ -75,6 +75,7 @@ public final class ReceiverRuntime {
         this.start = new StartSequence(new HotspotCheck(ifaces), files, nativeLib, advertiser, decoder, log);
         this.stop = new StopSequence(gate, start, advertiser, decoder, nativeLib, log, display, cover);
         gate.useUptimeLog();
+        gate.logNoticeAddFailures();
         gate.setStartHook(new Receiver.StartHook() {
             @Override
             public void beforeStartRecord(boolean requirePark) {
