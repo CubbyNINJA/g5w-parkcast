@@ -296,7 +296,7 @@ def repo_patches(repo_root, tracked):
     out = []
     for p in sorted(pdir.glob("*.patch"), key=lambda x: x.name):
         real = p.resolve()
-        if not real.is_relative_to(root) or not p.is_file():
+        if root not in (real, *real.parents) or not p.is_file():  # is_relative_to needs Python 3.9
             raise PrepError(f"patch {p.name} resolves outside the repository")
         rel = f"{PATCH_DIR}/{p.name}"
         if not tracked(rel):
@@ -453,7 +453,7 @@ def prepare(lock_path, cache_dir, repo_root, *, fetch=None, fetch_uxplay=None, t
             raise PrepError(f"unguarded callbacks differ from {CALLBACKS_FILE}: not listed {extra}, listed but "
                             f"guarded or absent {gone}")
         work.rename(uxplay)
-        stamp.write_text(f"uxplay {head}\n", encoding="utf-8", newline="\n")
+        stamp.write_bytes(f"uxplay {head}\n".encode("utf-8"))  # bytes: LF on Windows, Python 3.8 has no newline=
         _log(lines, "native prep ok")
         return Result(uxplay, applied, lines, found)
     except PrepError as exc:
@@ -462,7 +462,7 @@ def prepare(lock_path, cache_dir, repo_root, *, fetch=None, fetch_uxplay=None, t
         _rmtree(uxplay)
         raise
     finally:
-        (cache / "native-prep.log").write_text("".join(f"{ln}\n" for ln in lines), encoding="utf-8", newline="\n")
+        (cache / "native-prep.log").write_bytes("".join(f"{ln}\n" for ln in lines).encode("utf-8"))
 
 
 def main(argv=None) -> int:

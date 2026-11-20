@@ -346,7 +346,7 @@ def write_result(run_dir, root, tier: str = "unit", ios: str | None = None) -> P
     dest = root / "docs" / "evidence"
     dest.mkdir(parents=True, exist_ok=True)
     path = dest / f"{run_dir.name}-summary.md"
-    path.write_text(result.summary, encoding="utf-8", newline="\n")
+    path.write_bytes(result.summary.encode("utf-8"))  # LF on Windows; Python 3.8 has no write_text(newline=)
     return path
 
 
