@@ -1,11 +1,14 @@
 package parkcast.core.steps;
 
 import static parkcast.core.steps.Check.assertEquals;
+import static parkcast.core.steps.Check.assertFalse;
 import static parkcast.core.steps.Check.assertTrue;
 
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import java.util.List;
+import java.util.regex.Pattern;
+import parkcast.gate.harness.Fakes;
 import parkcast.core.doubles.BlackCover;
 import parkcast.core.doubles.Trace;
 
@@ -90,5 +93,82 @@ public final class StreamSteps {
         assertTrue(w.codecs.last.surface == BlackCover.SURFACE, "configured with " + w.codecs.last.surface);
         assertEquals(1, w.trace.current("codec", "configure").size(), "configure calls");
         assertEquals(1, w.trace.current("codec", "start").size(), "start calls");
+    }
+
+    // ---- Stream geometry and the letterbox (AIR-051(b), (c)) ----
+
+    @Given("^a session starts at (\\d+) ms with stream geometry (\\d+)x(\\d+)$")
+    public void sessionWithGeometry(int ms, int width, int height) {
+        w.nativeLib.sessionW = width;
+        w.nativeLib.sessionH = height;
+        w.sessionsAt.add((long) ms);
+    }
+
+    @Then("^the video is drawn in a box of (\\d+)x(\\d+) on the 1920x720 screen, at x (\\d+)(?: or (\\d+))? and y (\\d+), within 1 px$")
+    public void videoBox(int width, int height, int x, String xAlt, int y) {
+        ensureRun(w);
+        int[] box = lastBox();
+        int x2 = xAlt == null ? x : Integer.parseInt(xAlt);
+        assertTrue(Math.abs(box[0] - width) <= 1 && Math.abs(box[1] - height) <= 1, "box " + box[0] + "x" + box[1]);
+        assertTrue(box[2] >= Math.min(x, x2) - 1 && box[2] <= Math.max(x, x2) + 1, "x " + box[2]);
+        assertTrue(Math.abs(box[3] - y) <= 1, "y " + box[3]);
+    }
+
+    @Then("the rest of the screen is black")
+    public void restIsBlack() {
+        ensureRun(w);
+        List<Trace.Entry> boxes = w.trace.current("cover", "videoBox");
+        int[] box = lastBox();
+        for (Trace.Entry e : boxes) assertEquals(boxes.get(0).details, e.details, "the video box moved");
+        assertTrue(box[2] >= 0 && box[3] >= 0 && box[2] + box[0] <= 1920 && box[3] + box[1] <= 720,
+                "box outside the screen: " + boxes.get(0).details);
+        Trace.Entry firstRender = null;
+        for (Trace.Entry e : w.trace.current("codec", "releaseOutput"))
+            if (firstRender == null && e.details.endsWith("render=true")) firstRender = e;
+        assertTrue(firstRender != null, "nothing was rendered");
+        assertTrue(boxes.get(0).seq < firstRender.seq, "the box was set after the first render");
+    }
+
+    @Then("^the log records the stream geometry (\\d+)x(\\d+)$")
+    public void logGeometry(int width, int height) {
+        ensureRun(w);
+        Pattern p = Pattern.compile("(^|\\s)" + width + "x" + height + "(\\s|$)");
+        boolean found = false;
+        for (Fakes.Line l : w.lines()) if (p.matcher(S3World.body(l)).find()) found = true;
+        assertTrue(found, "no log record names " + width + "x" + height + ": " + w.bodies());
+    }
+
+    /** The latest box: {width, height, x, y}. */
+    private int[] lastBox() {
+        List<Trace.Entry> boxes = w.trace.current("cover", "videoBox");
+        assertFalse(boxes.isEmpty(), "the video box was never set");
+        String d = boxes.get(boxes.size() - 1).details;
+        String[] wh = d.substring(0, d.indexOf(" at ")).split("x");
+        String[] xy = d.substring(d.indexOf(" at ") + 4).split(",");
+        return new int[] {Integer.parseInt(wh[0]), Integer.parseInt(wh[1]), Integer.parseInt(xy[0]), Integer.parseInt(xy[1])};
+    }
+
+    // ---- HEVC (AIR-052(b)) ----
+
+    @Given("a session starts at {int} ms, but video_set_codec_and_size reports HEVC with an HEVC codec-configuration fixture")
+    public void hevcSession(int ms) {
+        w.nativeLib.sessionCodec = "h265";
+        w.sessionsAt.add((long) ms);
+    }
+
+    @Then("no byte of the HEVC fixture was queued to the fake codec")
+    public void noHevcQueued() {
+        ensureRun(w);
+        assertTrue(w.trace.current("codec", "queue").isEmpty(), "queued: " + w.trace.current("codec", "queue"));
+        assertTrue(w.trace.current("codec", "create").isEmpty(), "a codec was created: " + w.trace.current("codec", "create"));
+    }
+
+    @Then("the session is ended")
+    public void sessionEnded() {
+        ensureRun(w);
+        boolean ended = false;
+        for (Trace.Entry e : w.trace.current("native", "session")) if (e.details.startsWith("ended ")) ended = true;
+        assertTrue(ended, "the session was not ended: " + w.trace.current("native", null));
+        assertFalse(w.nativeLib.sessionOpen(), "a session is still open");
     }
 }
