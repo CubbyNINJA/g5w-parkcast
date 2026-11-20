@@ -127,10 +127,14 @@ public class LogSteps {
     public void logUntilRotated(long n, int times) {
         int r0 = w.logs.rotations;
         recordSize = n;
+        // One rotation needs at most 2,621,440 / n records plus two (AIR-040(a)), so a log that never rotates
+        // fails here instead of looping for minutes.
+        long limit = (long) times * (2621440L / Math.max(1L, n) + 2) + 10;
+        long count = 0;
         while (w.logs.rotations - r0 < times) {
             w.logRecordOfSize(n);
             loggedCount++;
-            if (loggedCount > 10000000) throw new AssertionError("no " + times + " rotations after " + loggedCount + " records");
+            if (++count > limit) throw new AssertionError("no " + times + " rotations after " + count + " records");
         }
     }
 
