@@ -95,6 +95,49 @@ public final class BroadcastSteps {
         assertTrue(added.contains((long) t), "registration-failure notice added at " + added + ", not " + t + " ms");
     }
 
+    /** The ACC adapter alone over its own broadcast double, and what it told its listener. */
+    private FakeBroadcasts accOnly;
+    private final List<String> accReports = new ArrayList<>();
+
+    @When("the Android ACC adapter registers with sticky ACC status {int}")
+    public void accAdapterRegisters(int status) {
+        accOnly = new FakeBroadcasts(w.trace);
+        accOnly.sticky.put(FakeBroadcasts.ACC, new FakeBroadcasts.Intent(false).put(FakeBroadcasts.ACC_EXTRA, status));
+        new AccReceiver(accOnly, new FakeThreads(w.scheduler)).register(new parkcast.gate.port.AccSource.AccListener() {
+            @Override
+            public void registered(parkcast.gate.port.AccStatus s) {
+                accReports.add("registered " + s);
+            }
+
+            @Override
+            public void registrationFailed(String cause) {
+                accReports.add("registration failed " + cause);
+            }
+
+            @Override
+            public void changed(parkcast.gate.port.AccStatus s) {
+                accReports.add("changed " + s);
+            }
+        });
+        w.scheduler.runUntil(w.scheduler.now());
+    }
+
+    /** Android hands a new receiver the sticky intent once more, marked as the initial sticky broadcast. */
+    @When("its receiver then gets the initial sticky ACC broadcast of status {int}")
+    public void accInitialSticky(int status) {
+        accOnly.deliver(FakeBroadcasts.ACC, new FakeBroadcasts.Intent(true).put(FakeBroadcasts.ACC_EXTRA, status));
+    }
+
+    @When("its receiver then gets an ACC broadcast of status {int}")
+    public void accBroadcast(int status) {
+        accOnly.deliver(FakeBroadcasts.ACC, new FakeBroadcasts.Intent(false).put(FakeBroadcasts.ACC_EXTRA, status));
+    }
+
+    @Then("the ACC adapter reported {string} and then {string} only")
+    public void accReported(String first, String second) {
+        assertEquals(java.util.Arrays.asList(first, second), accReports, "what the ACC adapter reported");
+    }
+
     // ------------------------------------------------------------------ AIR-060: REVERSE_ON
 
     @When("the lifecycle double drives onCreate, onStart and onResume at {int} ms")

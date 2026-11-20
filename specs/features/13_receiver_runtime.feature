@@ -473,7 +473,7 @@ Feature: The AirPlay receiver's runtime, with doubles
     And every call ran on a thread other than the main thread
     And no call started while another was in flight
 
-  @offline @failure @AIR-058 @AT-58 @OD-185
+  @offline @failure @AIR-058 @AT-58 @OD-185 @OD-196
   Scenario Outline: A failed or late Park getter call gives unavailable, logged with its class
     Given the getGearPStatus() call started at 200 ms <fault>
     When the receiver runs for 1000 ms
@@ -484,6 +484,7 @@ Feature: The AirPlay receiver's runtime, with doubles
     Examples:
       | fault                                                          | named                                     |
       | does not reply within 200 ms                                   | "java.util.concurrent.TimeoutException"   |
+      | replies exactly 200 ms after the call started                  | "java.util.concurrent.TimeoutException"   |
       | throws SecurityException                                       | "java.lang.SecurityException"             |
       | throws android.os.DeadObjectException                          | "android.os.DeadObjectException"          |
       | fails because VehicleInfoManager's class is missing            | "java.lang.NoClassDefFoundError"          |
@@ -513,6 +514,13 @@ Feature: The AirPlay receiver's runtime, with doubles
       | forbidden                         |
       | registerSystemOffResponder        |
       | micom power transaction 14        |
+
+  @offline @boundary @AIR-059 @AIR-019 @AT-59
+  Scenario: The initial sticky ACC delivery is the registered state, not a change
+    When the Android ACC adapter registers with sticky ACC status 0
+    And its receiver then gets the initial sticky ACC broadcast of status 0
+    And its receiver then gets an ACC broadcast of status 6
+    Then the ACC adapter reported "registered 0" and then "changed 6" only
 
   @offline @failure @AIR-059 @AT-59
   Scenario Outline: A failed ACC registration gives AIR-019's record and notice
@@ -708,6 +716,18 @@ Feature: The AirPlay receiver's runtime, with doubles
     When those scenarios run
     Then every one of them passes against that adapter
     And the fake service recorded no setter call
+
+  @offline @boundary @AIR-066 @AIR-038 @AT-66 @OD-195 @OD-196
+  Scenario Outline: The regulation adapter gives S2's words for 0 and 1 and unavailable for any other status
+    Given the fake com.hkmc.regulation service reports status <status> when asked
+    When the Android regulation adapter registers
+    Then the regulation adapter reported <reported>
+
+    Examples:
+      | status | reported                        |
+      | 0      | state "unrestricted"            |
+      | 1      | state "restricted"              |
+      | 2      | unavailable "unknown value 2"   |
 
   @offline @normal @AIR-067 @AT-67
   Scenario: The S2_GATE forbidden list, widened to the whole app, finds nothing

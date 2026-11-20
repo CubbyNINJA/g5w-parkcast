@@ -6,16 +6,20 @@ import static parkcast.core.steps.Check.assertTrue;
 
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
+import io.cucumber.java.en.When;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import parkcast.core.adapter.ConfigAdapter;
 import parkcast.core.adapter.ParkCall;
+import parkcast.core.adapter.RegulationAdapter;
 import parkcast.core.doubles.FakeGear;
 import parkcast.core.doubles.FakeThreads;
 import parkcast.core.doubles.RecordingParkGetter;
 import parkcast.core.doubles.Trace;
+import parkcast.core.port.RegulationBinder;
+import parkcast.gate.port.RegulationSource;
 import parkcast.gate.harness.Fakes;
 
 /**
@@ -61,6 +65,9 @@ public final class AndroidPortSteps {
         switch (fault) {
             case "does not reply within 200 ms":
                 gear.durationAt.put(t, 300L);
+                break;
+            case "replies exactly 200 ms after the call started":
+                gear.durationAt.put(t, 200L);
                 break;
             case "throws SecurityException":
                 gear.faultAt.put(t, new SecurityException("denied"));
@@ -129,6 +136,52 @@ public final class AndroidPortSteps {
             }
         }
         throw new AssertionError("mirrored video was never permitted and then blocked: " + w.bodies());
+    }
+
+    /** The status the fake regulation service gives at registration, and what the adapter reported. */
+    private int regulationStatus;
+    private final List<String> regulationReports = new ArrayList<>();
+
+    @Given("the fake com.hkmc.regulation service reports status {int} when asked")
+    public void regulationStatus(int status) {
+        regulationStatus = status;
+    }
+
+    @When("the Android regulation adapter registers")
+    public void regulationRegisters() {
+        final int status = regulationStatus;
+        RegulationBinder service = new RegulationBinder() {
+            @Override
+            public int getStatus() {
+                return status;
+            }
+
+            @Override
+            public void addListener(Listener l) {
+            }
+
+            @Override
+            public void removeListener(Listener l) {
+            }
+        };
+        new RegulationAdapter(service).register(new RegulationSource.RegulationListener() {
+            @Override
+            public void state(String s) {
+                regulationReports.add("state \"" + s + "\"");
+            }
+
+            @Override
+            public void unavailable(String reason) {
+                regulationReports.add("unavailable \"" + reason + "\"");
+            }
+        });
+    }
+
+    @Then("the regulation adapter reported {}")
+    public void regulationReported(String what) {
+        List<String> want = new ArrayList<>();
+        want.add(what);
+        assertEquals(want, regulationReports, "what the regulation adapter reported");
     }
 
     @Then("the fake file system recorded config reads only of {}")
