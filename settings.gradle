@@ -1,5 +1,35 @@
 // The Java build (OD-134): the receiver's plain-Java parking gate and its Cucumber-JVM tests (OD-133).
 // S1 and the shared tag/trace checks run under pytest; see README.md.
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    plugins {
+        // AGP 8.7.x on the Gradle 8.10.2 wrapper (docs/design/S3_RECEIVER.md).
+        id 'com.android.application' version '8.7.3'
+    }
+}
+
 rootProject.name = 'g5w-parkcast'
 include 'receiver:gate'
 include 'receiver:core'
+
+// The Android app needs the SDK, so it is included only when one is configured (AIR-046(c)). The gate and
+// core build without it.
+def sdkDir = null
+def localProps = file('local.properties')
+if (localProps.isFile()) {
+    def props = new Properties()
+    localProps.withInputStream { props.load(it) }
+    sdkDir = props.getProperty('sdk.dir')
+}
+def androidHome = System.getenv('ANDROID_HOME')
+if (providers.gradleProperty('parkcast.noApp').isPresent()) {
+    println 'parkcast: receiver/app skipped: -Pparkcast.noApp is set'
+} else if (!sdkDir && !androidHome) {
+    println 'parkcast: receiver/app skipped: no sdk.dir in local.properties and ANDROID_HOME is unset'
+} else {
+    include 'receiver:app'
+}

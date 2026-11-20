@@ -1,0 +1,171 @@
+// The receiver APK (docs/design/S3_RECEIVER.md): a thin Android shell over receiver/core and libparkcast.
+// "./gradlew assembleRelease" is the one command that yields the signed APK (AIR-046(b)).
+plugins {
+    id 'com.android.application'
+}
+
+// AGP resolves aapt2 as a Maven artifact, so the app needs Google's repository too.
+repositories {
+    google()
+    mavenCentral()
+}
+
+// NDK r25c only (AIR-043). The check runs while this script is evaluated, before AGP resolves or uses any
+// NDK, so a wrong NDK stops the build before CMake runs, and no other NDK on the PC is picked instead. The
+// failure names the revision found; it never names the expected one by its number, so the output never
+// mentions another installed NDK.
+def NDK_REVISION = '25.2.9519653'
+def localProps = new Properties()
+def localFile = rootProject.file('local.properties')
+if (localFile.isFile()) localFile.withInputStream { localProps.load(it) }
+
+def ndkHome() {
+    def p = new Properties()
+    def f = rootProject.file('local.properties')
+    if (f.isFile()) f.withInputStream { p.load(it) }
+    if (p.getProperty('ndk.dir')) return [file(p.getProperty('ndk.dir')), 'ndk.dir in local.properties']
+    if (System.getenv('ANDROID_NDK_HOME')) return [file(System.getenv('ANDROID_NDK_HOME')), 'ANDROID_NDK_HOME']
+    def sdk = p.getProperty('sdk.dir') ?: System.getenv('ANDROID_HOME')
+    return [new File(file(sdk), 'ndk/25.2.9519653'), 'the SDK']
+}
+
+def ndkRevision(File dir) {
+    def props = new File(dir, 'source.properties')
+    if (!props.isFile()) return null
+    def p = new Properties()
+    props.withInputStream { p.load(it) }
+    return p.getProperty('Pkg.Revision')?.trim()
+}
+
+def checkNdkNow = {
+    def (dir, from) = ndkHome()
+    def found = ndkRevision(dir)
+    if (found == null)
+        throw new GradleException("parkcast: the NDK from ${from} is missing: no source.properties in ${dir}; the receiver needs NDK r25c")
+    if (found != NDK_REVISION)
+        throw new GradleException("parkcast: the NDK from ${from} is ${found}; the receiver needs NDK r25c, and no other NDK is used")
+}
+checkNdkNow()
+
+tasks.register('checkNdk') {
+    group = 'verification'
+    description = 'Fails unless the configured NDK is r25c.'
+    doLast { checkNdkNow() }
+}
+
+// Signing inputs (AIR-047, OD-188): all four come from git-ignored local.properties. The check names every
+// missing item and never prints a value; there is no debug-key fallback.
+def SIGNING_KEYS = ['parkcast.keystore', 'parkcast.keystore.password', 'parkcast.key.alias', 'parkcast.key.password']
+
+tasks.register('checkSigningInputs') {
+    group = 'verification'
+    description = 'Fails, naming each missing signing input, unless local.properties can sign the release.'
+    doLast {
+        def missing = []
+        if (!localFile.isFile()) {
+            missing << "local.properties (expected at ${localFile}, with ${SIGNING_KEYS.join(', ')})"
+        } else {
+            SIGNING_KEYS.each { k -> if (!localProps.getProperty(k)) missing << "${k} in local.properties" }
+            def store = localProps.getProperty('parkcast.keystore')
+            if (store && !file(store).isFile()) missing << "the key file named by parkcast.keystore: ${file(store)}"
+        }
+        if (!missing.isEmpty()) {
+            missing.each { logger.error("parkcast: signing input missing: ${it}") }
+            throw new GradleException("parkcast: release signing input missing: " + missing.join('; '))
+        }
+    }
+}
+
+// The UxPlay commit pinned in receiver/native/deps.lock, for the start marker (AIR-071(a)).
+def uxplayCommit() {
+    def lock = rootProject.file('receiver/native/deps.lock')
+    def section = null
+    for (line in lock.readLines('UTF-8')) {
+        def t = line.trim()
+        if (t.startsWith('[')) { section = t; continue }
+        def m = t =~ /^commit\s*=\s*([0-9a-f]{40})$/
+        if (section == '[uxplay]' && m) return m[0][1]
+    }
+    throw new GradleException("parkcast: no commit line under [uxplay] in ${lock}")
+}
+
+def gitCommit = providers.exec {
+    commandLine 'git', 'rev-parse', 'HEAD'
+    workingDir rootProject.projectDir
+}.standardOutput.asText.get().trim()
+
+// libparkcast is built only when its CMake project is present or -Pparkcast.native asks for it.
+def cmakeLists = rootProject.file('receiver/native/CMakeLists.txt')
+def buildNative = cmakeLists.isFile() || providers.gradleProperty('parkcast.native').isPresent()
+
+android {
+    namespace 'parkcast.receiver'
+    compileSdk 34
+    ndkVersion NDK_REVISION
+
+    defaultConfig {
+        applicationId 'parkcast.receiver'
+        minSdk 19
+        targetSdk 19
+        versionCode 1
+        versionName '0.3.0'
+        buildConfigField 'String', 'APP_VERSION', "\"${versionName}\""
+        buildConfigField 'String', 'GIT_COMMIT', "\"${gitCommit}\""
+        buildConfigField 'String', 'UXPLAY_COMMIT', "\"${uxplayCommit()}\""
+        ndk {
+            abiFilters 'armeabi-v7a'
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        release {
+            def store = localProps.getProperty('parkcast.keystore')
+            if (store) storeFile file(store)
+            storePassword localProps.getProperty('parkcast.keystore.password')
+            keyAlias localProps.getProperty('parkcast.key.alias')
+            keyPassword localProps.getProperty('parkcast.key.password')
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+        encoding 'UTF-8'
+    }
+
+    if (buildNative) {
+        externalNativeBuild {
+            cmake {
+                path cmakeLists
+                version '3.22.1'
+            }
+        }
+    }
+
+    lint {
+        // fatal is error severity that also stops lintVitalRelease, so assembleRelease enforces it.
+        fatal 'NewApi'
+        abortOnError true
+        // The APK is never published, so the store's target-SDK floor does not apply.
+        disable 'ExpiredTargetSdkVersion'
+    }
+}
+
+dependencies {
+    implementation project(':receiver:core')
+    implementation project(':receiver:gate')
+}
+
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn 'checkNdk' }
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn 'checkSigningInputs' }
