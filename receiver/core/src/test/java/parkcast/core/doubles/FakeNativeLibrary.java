@@ -311,6 +311,10 @@ public final class FakeNativeLibrary implements NativeLibrary {
         r.run();
     }
 
+    /** The fixture's parameter sets (SPS, PPS) and one access unit, Annex-B framed. */
+    static final byte[] CSD = {0, 0, 0, 1, 0x67, 0x42, 0, 0, 0, 1, 0x68, (byte) 0xce};
+    static final byte[] AU = {0, 0, 0, 1, 0x65, (byte) 0x88};
+
     private void deliverStarted(final int gen) {
         final NativeEvents e = events;
         deliver("sessionStarted", () -> e.sessionStarted(gen));
@@ -318,12 +322,12 @@ public final class FakeNativeLibrary implements NativeLibrary {
 
     private void deliverConfig(final int gen, final String codec, final int w, final int h) {
         final NativeEvents e = events;
-        deliver("codecConfig " + codec + " " + w + "x" + h, () -> e.codecConfig(gen, codec, w, h));
+        deliver("codecConfig " + codec + " " + w + "x" + h, () -> e.codecConfig(gen, codec, w, h, CSD));
     }
 
     private void deliverUnit(final int gen, final long pts) {
         final NativeEvents e = events;
-        deliver("accessUnit " + pts, () -> e.accessUnit(gen, pts));
+        deliver("accessUnit " + pts, () -> e.accessUnit(gen, pts, AU));
     }
 
     private void streamFrom(final int gen) {

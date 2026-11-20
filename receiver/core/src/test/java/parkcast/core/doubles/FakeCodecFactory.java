@@ -47,10 +47,15 @@ public final class FakeCodecFactory implements CodecFactory {
         private int next;
         /** The surface passed to configure. */
         public Object surface;
+        /** The codec-specific data passed to configure. */
+        public byte[] csd;
+        /** Bytes of the last queued access unit. */
+        public int lastQueuedBytes = -1;
 
         @Override
-        public void configure(String mime, int width, int height, Object surface) {
+        public void configure(String mime, int width, int height, byte[] csd, Object surface) {
             this.surface = surface;
+            this.csd = csd;
             trace.add("codec", "configure", mime + " " + width + "x" + height + " surface=" + surface);
             if (throwOnConfigure) throw new IllegalStateException("synthetic configure failure");
         }
@@ -63,6 +68,7 @@ public final class FakeCodecFactory implements CodecFactory {
         @Override
         public boolean queue(byte[] au, final long ptsUs) {
             failIfDue("queue");
+            lastQueuedBytes = au.length;
             trace.add("codec", "queue", String.valueOf(ptsUs));
             final long due = scheduler.now() + OUTPUT_AFTER_MS;
             scheduler.at(due, () -> ready.add(due));

@@ -4,10 +4,14 @@ package parkcast.core.port;
 public interface NativeEvents {
     void sessionStarted(int generation);
 
-    /** {@code video_set_codec_and_size}: the stream's codec ("h264" or "h265") and size. */
-    void codecConfig(int generation, String codec, int width, int height);
+    /**
+     * {@code video_set_codec_and_size}: the stream's codec ("h264" or "h265"), its size, and its codec-specific
+     * data (Annex-B parameter sets; may be empty, never null).
+     */
+    void codecConfig(int generation, String codec, int width, int height, byte[] csd);
 
-    void accessUnit(int generation, long ptsMs);
+    /** One Annex-B access unit with its presentation time in milliseconds. */
+    void accessUnit(int generation, long ptsMs, byte[] au);
 
     void sessionEnded(int generation);
 
