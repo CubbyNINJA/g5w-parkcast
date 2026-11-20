@@ -159,6 +159,11 @@ public final class Receiver {
         log.useUptimePrefix();
     }
 
+    /** Records failed registration- and logging-failure notice attempts as well (AIR-061(b)); S3 only. */
+    public void logNoticeAddFailures() {
+        notices.logAddFailures();
+    }
+
     /** Writes one record through the receiver's log, with its rotation and logging-failure handling. */
     public void record(String line) {
         log.record(line);

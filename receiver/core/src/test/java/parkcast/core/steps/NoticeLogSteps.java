@@ -54,8 +54,8 @@ public final class NoticeLogSteps {
 
     // ------------------------------------------------------------------ AIR-062: the log directory
 
-    /** In the AIR-062 failure scenarios, frames arrive every millisecond from 0 ms. */
-    @Before("@AIR-062 and @failure")
+    /** In the AIR-061 and AIR-062 failure scenarios, frames arrive every millisecond from 0 ms. */
+    @Before("(@AIR-061 or @AIR-062) and @failure")
     public void pumpFrames() {
         pumping = true;
         tick(0);
