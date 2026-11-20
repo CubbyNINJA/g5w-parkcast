@@ -136,4 +136,8 @@ public final class S3World {
         seededMode = FakeNativeLibrary.KEY_MODE;
         fs.seed(KEY_PATH, bytes, seededMode);
     }
+
+    {
+        trace.log = g.logs.lines;
+    }
 }

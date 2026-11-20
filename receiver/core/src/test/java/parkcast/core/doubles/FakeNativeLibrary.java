@@ -2,8 +2,10 @@ package parkcast.core.doubles;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import parkcast.core.port.NativeEvents;
 import parkcast.core.port.NativeLibrary;
@@ -46,6 +48,9 @@ public final class FakeNativeLibrary implements NativeLibrary {
         events = null;
         accepting = false;
         generation = 0;
+        connected = false;
+        windowStart = -1;
+        registered.clear();
     }
 
     @Override
@@ -58,10 +63,8 @@ public final class FakeNativeLibrary implements NativeLibrary {
                 return bind(plan);
             case ADVERTISE:
                 trace.add("native", "advertise", "");
-                trace.add("dnssd", "connect", "ok");
-                trace.add("dnssd", "register", "_airplay._tcp");
-                trace.add("dnssd", "register", "_raop._tcp");
-                return StartResult.ok(StartResult.MDNSD_UP);
+                events = e;
+                return connected ? register() : probe();
             case ACCEPT:
                 trace.add("native", "accept", "");
                 events = e;
@@ -125,9 +128,13 @@ public final class FakeNativeLibrary implements NativeLibrary {
 
     @Override
     public void stop(Phase p) {
+        if (stopThrows.contains(p)) throw new IllegalStateException(trace.add("native", "stopThrew", p.name()).toString());
         trace.add("native", "stop", p.name());
         if (p == Phase.ACCEPT) accepting = false;
-        if (p == Phase.REGISTRATIONS) trace.add("dnssd", "withdraw", "all");
+        if (p == Phase.REGISTRATIONS) {
+            for (String type : registered) trace.add("dnssd", "withdraw", type);
+            registered.clear();
+        }
         if (p == Phase.PORTS) closeAll();
     }
 
@@ -135,4 +142,73 @@ public final class FakeNativeLibrary implements NativeLibrary {
     public Status status() {
         return new Status(accepting, generation);
     }
+
+    /** The socket path the dns_sd client connects to. */
+    public static final String MDNSD = "/dev/socket/mdnsd";
+    /** The instance names the library registers, by service type, in registration order. */
+    public static final String[][] REGISTRATIONS = {{"_airplay._tcp", "ParkCast"}, {"_raop._tcp", "0A1B2C3D4E5F@ParkCast"}};
+
+    /** While non-null, each connect fails with this errno (ENOENT for a missing socket). */
+    public String connectErrno;
+    /** With {@link #connectErrno} set: the connect succeeds from this many ms into the connect window; -1 never. */
+    public long connectOkAfterMs = -1;
+    /** Service types whose TXT record cannot be built. */
+    public final Set<String> txtFails = new HashSet<>();
+    /** Service types whose registration returns this dns_sd error code. */
+    public final Map<String, Integer> registerError = new HashMap<>();
+    /** Service types whose registration is sent and then gets a name-conflict reply with this code. */
+    public final Map<String, Integer> conflict = new HashMap<>();
+
+    private boolean connected;
+    /** When the first connect of this start was attempted; -1 before it. */
+    private long windowStart = -1;
+    /** Registrations in place, by service type. */
+    private final List<String> registered = new ArrayList<>();
+
+    /** A call before the connect succeeded: one connect probe. */
+    private StartResult probe() {
+        long now = trace.now();
+        if (windowStart < 0) windowStart = now;
+        if (connectErrno != null && (connectOkAfterMs < 0 || now - windowStart < connectOkAfterMs)) {
+            trace.add("dnssd", "connect", MDNSD + " " + connectErrno);
+            return StartResult.failed(connectErrno);
+        }
+        trace.add("dnssd", "connect", MDNSD + " ok");
+        connected = true;
+        return StartResult.ok(StartResult.MDNSD_UP);
+    }
+
+    /** A call once connected: both registrations, in order, each only once its TXT record is complete. */
+    private StartResult register() {
+        for (String[] r : REGISTRATIONS) {
+            String type = r[0];
+            if (txtFails.contains(type)) return StartResult.failed("txt-build");
+            trace.add("dnssd", "txt", type + " complete");
+            String reg = type + " name=" + r[1] + " txt=complete rename=off";
+            Integer err = registerError.get(type);
+            if (err != null) {
+                trace.add("dnssd", "register", reg + " error=" + err);
+                return StartResult.failed("register " + err);
+            }
+            trace.add("dnssd", "register", reg);
+            registered.add(type);
+            Integer c = conflict.get(type);
+            if (c != null) {
+                trace.add("dnssd", "conflict", type + " " + c);
+                return StartResult.failed("name-conflict " + c);
+            }
+        }
+        return StartResult.ok("registered");
+    }
+
+    /** The fake dns_sd closes its connection: the registrations are gone and Java is told. */
+    public void closeConnection() {
+        trace.add("dnssd", "close", MDNSD);
+        connected = false;
+        registered.clear();
+        if (events != null) events.advertiseLost(generation);
+    }
+
+    /** Stop phases whose call throws java.lang.IllegalStateException before doing anything. */
+    public final Set<Phase> stopThrows = new HashSet<>();
 }

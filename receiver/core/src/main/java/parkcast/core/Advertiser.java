@@ -12,6 +12,7 @@ import parkcast.gate.port.Scheduler;
 final class Advertiser {
     static final String TYPE = "_airplay._tcp";
     static final long WINDOW_MS = 5000L;
+    static final long RETRY_MS = 250L;
 
     /** What the start sequence does next. */
     interface Outcome {
@@ -33,6 +34,10 @@ final class Advertiser {
     private boolean discoveryStopped;
     private boolean advertiseCalled;
     private boolean done;
+    /** The pending connect retry, if any. */
+    private Scheduler.Task retry;
+    /** When {@code onDiscoveryStarted} opened the connect window. */
+    private long windowStart;
 
     Advertiser(Scheduler scheduler, NsdWake nsd, NativeLibrary nativeLib, RuntimeLog log) {
         this.scheduler = scheduler;
@@ -88,18 +93,52 @@ final class Advertiser {
             return;
         }
         cancelTimeout();
-        // TODO(phase B: advertise probe) call start(ADVERTISE) every 250 ms for at most 5000 ms until the
-        // mdnsd connect probe succeeds, and map its socket errors to AIR-050(d)'s tokens.
-        advertiseCalled = true;
+        windowStart = scheduler.now();
+        attempt(plan, events, outcome);
+    }
+
+    /**
+     * One call of {@code start(ADVERTISE)} (AIR-050(c)). While mdnsd is not connected the call is a connect probe,
+     * retried every {@link #RETRY_MS} up to {@link #WINDOW_MS} after {@code onDiscoveryStarted}; once it connects,
+     * "mdnsd up" is logged and a second call sends the registrations.
+     */
+    private void attempt(final NativeLibrary.StartPlan plan, final NativeEvents events, final Outcome outcome) {
+        retry = null;
+        if (done) return;
         NativeLibrary.StartResult r = nativeLib.start(NativeLibrary.Stage.ADVERTISE, plan, events);
         if (r == null || !r.ok) {
-            fail(r == null ? "unreachable" : r.token, "none", outcome);
+            long next = scheduler.now() + RETRY_MS;
+            if (next - windowStart <= WINDOW_MS) {
+                retry = scheduler.at(next, new Runnable() {
+                    @Override
+                    public void run() {
+                        attempt(plan, events, outcome);
+                    }
+                });
+                return;
+            }
+            fail(connectToken(r), "none", outcome);
+            return;
+        }
+        log.record(NativeLibrary.StartResult.MDNSD_UP);
+        advertiseCalled = true;
+        r = nativeLib.start(NativeLibrary.Stage.ADVERTISE, plan, events);
+        if (r == null || !r.ok) {
+            String t = r == null || r.token == null ? "unreachable" : r.token;
+            int sp = t.indexOf(' ');
+            fail(sp < 0 ? t : t.substring(0, sp), sp < 0 ? "none" : t.substring(sp + 1), outcome);
             return;
         }
         done = true;
-        log.record(NativeLibrary.StartResult.MDNSD_UP);
         log.record("advertise ok");
         outcome.advertised();
+    }
+
+    /** AIR-050(d): these errnos are logged as they are; any other connect failure is "unreachable". */
+    private static String connectToken(NativeLibrary.StartResult r) {
+        String t = r == null ? null : r.token;
+        if ("ENOENT".equals(t) || "EACCES".equals(t) || "EPERM".equals(t) || "ECONNREFUSED".equals(t)) return t;
+        return "unreachable";
     }
 
     private void fail(String token, String code, Outcome outcome) {
@@ -131,5 +170,7 @@ final class Advertiser {
     private void cancelTimeout() {
         if (timeout != null) timeout.cancel();
         timeout = null;
+        if (retry != null) retry.cancel();
+        retry = null;
     }
 }

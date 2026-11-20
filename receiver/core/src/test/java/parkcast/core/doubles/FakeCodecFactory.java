@@ -70,7 +70,11 @@ public final class FakeCodecFactory implements CodecFactory {
 
         @Override
         public void release() {
+            if (throwOnRelease) throw new IllegalStateException(trace.add("codec", "releaseThrew", "").toString());
             trace.add("codec", "release", "");
         }
     }
+
+    /** Releasing a codec throws java.lang.IllegalStateException. */
+    public boolean throwOnRelease;
 }

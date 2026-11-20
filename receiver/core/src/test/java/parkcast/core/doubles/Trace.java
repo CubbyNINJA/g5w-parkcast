@@ -42,6 +42,7 @@ public final class Trace {
     public Entry add(String cause, String name, String details) {
         Entry e = new Entry(entries.size(), s.startIndex, s.now(), cause, name, details == null ? "" : details);
         entries.add(e);
+        logSizes.add(log == null ? 0 : log.size());
         return e;
     }
 
@@ -69,5 +70,14 @@ public final class Trace {
         StringBuilder b = new StringBuilder();
         for (Entry e : entries) b.append(e).append('\n');
         return b.toString();
+    }
+
+    /** The log's line list, set by the world, so steps can place log records between trace entries. */
+    public List<?> log;
+    /** For each entry, by seq: how many log lines existed when it was added. */
+    public final List<Integer> logSizes = new ArrayList<>();
+
+    public long now() {
+        return s.now();
     }
 }

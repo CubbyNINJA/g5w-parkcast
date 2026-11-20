@@ -13,7 +13,11 @@ public final class BlackCover implements CoverView {
 
     @Override
     public void black(boolean on) {
+        if (on && throwOnBlack) throw new IllegalStateException(trace.add("cover", "blackThrew", "on").toString());
         black = on;
         trace.add("cover", "black", on ? "on" : "off");
     }
+
+    /** Raising the cover throws java.lang.IllegalStateException (a failing "block video" stop step). */
+    public boolean throwOnBlack;
 }

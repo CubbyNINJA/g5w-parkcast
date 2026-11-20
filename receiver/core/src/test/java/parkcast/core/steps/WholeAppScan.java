@@ -188,7 +188,9 @@ final class WholeAppScan {
         } else if (rel.matches("receiver/[^/]+/build/classes/java/main/.*\\.class")) {
             List<String> pool = constantPool(p);
             units.add(new Unit(Kind.CLASS, rel, String.join("\n", pool), pool));
-        } else if (rel.startsWith("receiver/native/") && name.matches(".*\\.(c|h|cc|cpp)")) {
+        // Our own JNI and host sources only: receiver/native/.cache holds third-party downloads (OpenSSL,
+        // libplist, UxPlay), which native prep fetches and which are not the receiver's code (S3_RECEIVER.md).
+        } else if (rel.startsWith("receiver/native/src/") && name.matches(".*\\.(c|h|cc|cpp)")) {
             String t = stripComments(read(p));
             units.add(new Unit(Kind.NATIVE, rel, t, java.util.Arrays.asList(t.split("[;{}]"))));
         } else if (rel.startsWith("receiver/native/") && name.endsWith(".patch")) {

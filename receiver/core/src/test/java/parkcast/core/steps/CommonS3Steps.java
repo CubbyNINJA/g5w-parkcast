@@ -55,6 +55,7 @@ public final class CommonS3Steps {
 
     @Then("the log has {string}")
     public void logHas(String s) {
+        if (!w.started) w.settle();
         assertTrue(record(s, null) != null, "no record starting \"" + s + "\" in " + w.bodies());
     }
 
@@ -159,8 +160,17 @@ public final class CommonS3Steps {
     }
 
     @Given("a session starts at {int} ms")
-    public void sessionAt(int t) {
-        w.sessionsAt.add((long) t);
+    public void sessionStartsAt(int t) {
+        if (w.started) {
+            w.scheduler.script(t, parkcast.gate.harness.VirtualScheduler.AFTER, new Runnable() {
+                @Override
+                public void run() {
+                    w.nativeLib.session("h264", 1920, 720);
+                }
+            });
+        } else {
+            w.sessionsAt.add((long) t);
+        }
     }
 
     @When("the receiver runs for {int} ms and then exit\\() is called")

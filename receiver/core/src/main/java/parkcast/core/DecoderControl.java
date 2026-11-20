@@ -64,7 +64,7 @@ final class DecoderControl implements NativeEvents {
     @Override
     public void advertiseLost(int generation) {
         if (stopped) return;
-        // TODO(phase B: advertise lost) handle the lost registration.
+        log.record("advertise lost");
     }
 
     @Override
