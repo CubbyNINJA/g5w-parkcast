@@ -39,6 +39,7 @@ final class StartSequence {
     void run() {
         // TODO(phase B: carplay probe) log carplay listener present/absent/unknown; never refuse to start on it
         // (AIR-079(b) to (d)).
+        if (carplay != null) carplay.run();
         String hotspotFailure = hotspot.run();
         if (hotspotFailure != null) log.record(hotspotFailure);
 
@@ -106,5 +107,12 @@ final class StartSequence {
     /** True once the library has been called for this app start, so the stop steps have something to undo. */
     boolean nativeStarted() {
         return nativeStarted;
+    }
+
+    private CarplayProbe carplay;
+
+    /** The CarPlay listener check, run first in {@link #run()} (AIR-079(b) to (d)). */
+    void useCarplayProbe(CarplayProbe p) {
+        carplay = p;
     }
 }

@@ -7,6 +7,7 @@ import parkcast.core.port.CrashHook;
 import parkcast.core.port.InterfaceQuery;
 import parkcast.core.port.NativeLibrary;
 import parkcast.core.port.NsdWake;
+import parkcast.core.port.ProcNetTcp;
 import parkcast.gate.Receiver;
 import parkcast.gate.port.AccSource;
 import parkcast.gate.port.BuildInfo;
@@ -83,6 +84,7 @@ public final class ReceiverRuntime {
             @Override
             public void crashed(Throwable t) {
                 // TODO(phase B: crash record) write the crash record and run the stop steps (AIR-071).
+                new CrashRecorder(log).record(t);
             }
         });
         gate.onCreate();
@@ -128,5 +130,10 @@ public final class ReceiverRuntime {
             return UNKNOWN_PRODUCT;
         }
         return p == null ? UNKNOWN_PRODUCT : p;
+    }
+
+    /** Wires the CarPlay listener check over {@code /proc/net/tcp} (AIR-079(b) to (d)). */
+    public void useProcNetTcp(ProcNetTcp p) {
+        start.useCarplayProbe(new CarplayProbe(p, log));
     }
 }

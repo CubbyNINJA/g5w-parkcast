@@ -10,6 +10,7 @@ import parkcast.core.doubles.FakeFileSystem;
 import parkcast.core.doubles.FakeInterfaces;
 import parkcast.core.doubles.FakeNativeLibrary;
 import parkcast.core.doubles.FakeNsd;
+import parkcast.core.doubles.FakeProcNetTcp;
 import parkcast.core.doubles.Trace;
 import parkcast.gate.World;
 import parkcast.gate.harness.Fakes;
@@ -35,6 +36,7 @@ public final class S3World {
     public final FakeCodecFactory codecs = new FakeCodecFactory(trace, scheduler);
     public final BlackCover cover = new BlackCover(trace);
     public final FakeCrashHook crash = new FakeCrashHook(trace);
+    public final FakeProcNetTcp procNetTcp = new FakeProcNetTcp(trace);
 
     /** When the window first gains focus; 0 = inside the start, -1 = never. */
     public long focusAt = 0;
@@ -61,6 +63,7 @@ public final class S3World {
         started = true;
         final ReceiverRuntime r = build();
         runtime = r;
+        r.useProcNetTcp(procNetTcp);
         final boolean inLifecycle = focusAt == 0;
         scheduler.script(0, VirtualScheduler.FIRST, () -> {
             r.onCreate();
