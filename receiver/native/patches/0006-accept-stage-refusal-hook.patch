@@ -1,0 +1,92 @@
+diff --git a/lib/raop.c b/lib/raop.c
+--- a/lib/raop.c
++++ b/lib/raop.c
+@@ -98,8 +98,28 @@ struct raop_s {
+     const char *lang;
+     const char *lang_system;
+     const char *lang_subtitles;
++
++    /* ParkCast (AIR-053): optional refusal report, NULL when unset */
++    raop_refusal_callback_t refusal_cb;
++    void *refusal_cls;
+ };
+ 
++/* ParkCast (AIR-053): true if the request body names an HLS playlist. */
++static bool
++parkcast_body_has_m3u8(http_request_t *request) {
++    int len = 0;
++    const char *data = http_request_get_data(request, &len);
++    if (!data || len < 5) {
++        return false;
++    }
++    for (int i = 0; i + 5 <= len; i++) {
++        if (!memcmp(data + i, ".m3u8", 5)) {
++            return true;
++        }
++    }
++    return false;
++}
++
+ struct raop_conn_s {
+     raop_t *raop;
+     raop_ntp_t *raop_ntp;
+@@ -262,6 +282,22 @@ conn_request(void *ptr, http_request_t *request, http_response_t **response) {
+  /* this rejects messages from _airplay._tcp for video streaming protocol unless bool raop->hls_support is true*/   
+     if (!cseq && !raop->hls_support && !ble) {
+         logger_log(raop->logger, LOGGER_INFO, "ignoring AirPlay video streaming request (use option -hls to activate HLS support)");
++        /* ParkCast (AIR-053): classify only the requests that start playback */
++        if (raop->refusal_cb) {
++            int kind = 0;
++            const char *sid = http_request_get_header(request, "X-Apple-Session-ID");
++            const char *hst = http_request_get_header(request, "Host");
++            if (!strcmp(url, "/fp-setup2")) {
++                kind = RAOP_REFUSED_DRM;
++            } else if (hst && !sid) {
++                kind = RAOP_REFUSED_HLS;
++            } else if (!strcmp(url, "/play")) {
++                kind = parkcast_body_has_m3u8(request) ? RAOP_REFUSED_HLS : RAOP_REFUSED_URL;
++            }
++            if (kind) {
++                raop->refusal_cb(raop->refusal_cls, kind);
++            }
++        }
+         return;
+     }
+ 
+@@ -844,6 +880,13 @@ raop_stop_httpd(raop_t *raop) {
+     httpd_stop(raop->httpd);
+ }
+ 
++void
++raop_set_refusal_callback(raop_t *raop, raop_refusal_callback_t callback, void *cls) {
++    assert(raop);
++    raop->refusal_cb = callback;
++    raop->refusal_cls = cls;
++}
++
+ void raop_remove_known_connections(raop_t * raop) {
+     httpd_remove_known_connections(raop->httpd);
+ }
+diff --git a/lib/raop.h b/lib/raop.h
+--- a/lib/raop.h
++++ b/lib/raop.h
+@@ -153,6 +153,19 @@ RAOP_API void raop_set_udp_ports(raop_t *raop, unsigned short port[3]);
+ RAOP_API void raop_set_tcp_ports(raop_t *raop, unsigned short port[2]);
+ RAOP_API unsigned short raop_get_port(raop_t *raop);
+ RAOP_API void *raop_get_callback_cls(raop_t *raop);
++/* ParkCast (AIR-053): report requests refused because HLS support is off.
++ * Called on the connection thread; never carries the URL.  It sits outside
++ * raop_callbacks_t and may be left unset (NULL). */
++#define RAOP_REFUSED_URL 1
++#define RAOP_REFUSED_HLS 2
++#define RAOP_REFUSED_DRM 3
++typedef void (*raop_refusal_callback_t)(void *cls, int kind);
++RAOP_API void raop_set_refusal_callback(raop_t *raop, raop_refusal_callback_t callback, void *cls);
++
++/* ParkCast ACCEPT stage: when the RTSP port was held with netutils_hold_port
++ * (BIND stage), raop_start_httpd only starts accepting on that socket and
++ * raop_stop_httpd stops accepting; the port stays bound until
++ * netutils_release_ports. */
+ RAOP_API int raop_start_httpd(raop_t *raop, unsigned short *port);
+ RAOP_API int raop_is_running(raop_t *raop);
+ RAOP_API void raop_stop_httpd(raop_t *raop);

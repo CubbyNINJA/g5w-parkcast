@@ -1,0 +1,110 @@
+diff --git a/lib/dns_sd/dns_sd.c b/lib/dns_sd/dns_sd.c
+--- a/lib/dns_sd/dns_sd.c
++++ b/lib/dns_sd/dns_sd.c
+@@ -27,6 +27,8 @@
+ #include "../utils.h"
+ 
+ #define MAX_DEVICEID 18
++/* ParkCast: kDNSServiceFlagsNoAutoRename from Apple's dns_sd.h (an enum there, so not tested with #ifdef) */
++#define PARKCAST_FLAG_NO_AUTO_RENAME 0x8
+ #define MAX_SERVNAME 256
+ 
+ #if defined(HAVE_LIBDL) && !defined(__APPLE__)
+@@ -130,14 +132,24 @@ typedef struct dnssd_private_s {
+     DNSServiceRef raop_service;
+     DNSServiceRef airplay_service;
+ 
++    dnssd_register_reply_t register_reply;   /* ParkCast: may be NULL */
++    void *register_reply_cls;
+ } dnssd_private_t;
+ 
+ /* --- Dummy Callback to prevent Avahi/DBus from leaking OutgoingBytes --- */
++/* ParkCast: no longer a dummy. context is the dnssd_private_t; the reply code goes to the register_reply
++   callback, if one is set, tagged with the service it belongs to. */
+ static void DNSSD_STDCALL 
+ dnssd_register_dummy_callback(DNSServiceRef sdRef, DNSServiceFlags flags, DNSServiceErrorType errorCode,
+                               const char *name, const char *regtype, const char *domain, void *context) 
+ {
+-    (void)sdRef; (void)flags; (void)errorCode; (void)name; (void)regtype; (void)domain; (void)context;
++    (void)flags; (void)name; (void)regtype; (void)domain;
++    dnssd_private_t *dnssd = (dnssd_private_t *) context;
++    if (!dnssd || !dnssd->register_reply) {
++        return;
++    }
++    int service = (sdRef == dnssd->airplay_service) ? DNSSD_SERVICE_AIRPLAY : DNSSD_SERVICE_RAOP;
++    dnssd->register_reply(dnssd->register_reply_cls, service, (int) errorCode);
+ }
+ 
+ void *
+@@ -240,7 +252,7 @@ dnssd_register_raop(dnssd_t *dnssd_public, unsigned short port)
+     assert(dnssd_public);
+     assert(dnssd_public->dnssd_private);
+     dnssd_private_t *dnssd = (dnssd_private_t *) dnssd_public->dnssd_private;
+-    DNSServiceFlags flags = 0;
++    DNSServiceFlags flags = PARKCAST_FLAG_NO_AUTO_RENAME;   /* ParkCast: a conflict is an error, never a rename */
+     uint32_t interface_index = 0;
+ 
+ #if defined(__APPLE__) && defined(UXPLAY_HAVE_APPLE_P2P)
+@@ -314,7 +326,7 @@ dnssd_register_raop(dnssd_t *dnssd_public, unsigned short port)
+                                                           dnssd->TXTRecordGetLength(&dnssd->raop_record),
+                                                           dnssd->TXTRecordGetBytesPtr(&dnssd->raop_record),
+                                                           dnssd_register_dummy_callback,
+-                                                          NULL);
++                                                          dnssd);   /* ParkCast: context for the reply */
+ 
+     return (int) retval;   /* error codes are listed in Apple's dns_sd.h */
+ }
+@@ -328,7 +340,7 @@ dnssd_register_airplay(dnssd_t *dnssd_public, unsigned short port)
+     assert(dnssd_public);
+     assert(dnssd_public->dnssd_private);
+     dnssd_private_t *dnssd = (dnssd_private_t *) dnssd_public->dnssd_private;    
+-    DNSServiceFlags flags = 0;
++    DNSServiceFlags flags = PARKCAST_FLAG_NO_AUTO_RENAME;   /* ParkCast: a conflict is an error, never a rename */
+     uint32_t interface_index = 0;
+ 
+ #if defined(__APPLE__) && defined(UXPLAY_HAVE_APPLE_P2P)
+@@ -382,7 +394,7 @@ dnssd_register_airplay(dnssd_t *dnssd_public, unsigned short port)
+                                                            dnssd->TXTRecordGetLength(&dnssd->airplay_record),
+                                                            dnssd->TXTRecordGetBytesPtr(&dnssd->airplay_record),
+                                                            dnssd_register_dummy_callback,
+-                                                           NULL);
++                                                           dnssd);   /* ParkCast: context for the reply */
+ 
+     return (int) retval;   /* error codes are listed in Apple's dns_sd.h */
+ }
+@@ -485,6 +497,17 @@ dnssd_process_service(dnssd_t *dnssd_public, int service)
+     return (int) dnssd->DNSServiceProcessResult(ref);
+ }
+ 
++/* ParkCast: see dnssd.h */
++void
++dnssd_set_register_callback(dnssd_t *dnssd_public, dnssd_register_reply_t callback, void *cls)
++{
++    assert(dnssd_public);
++    assert(dnssd_public->dnssd_private);
++    dnssd_private_t *dnssd = (dnssd_private_t *) dnssd_public->dnssd_private;
++    dnssd->register_reply = callback;
++    dnssd->register_reply_cls = cls;
++}
++
+ void dnssd_error_text(int *dnssd_error, const char *appname) {
+     printf("*** dnssd_implementation: external, dns_sd.h\n");
+     if (*dnssd_error == -65537) {
+diff --git a/lib/dnssd.h b/lib/dnssd.h
+--- a/lib/dnssd.h
++++ b/lib/dnssd.h
+@@ -86,6 +86,14 @@ DNSSD_API void dnssd_set_pk(dnssd_t *dnssd, char * pk_str);
+ DNSSD_API int dnssd_get_service_fd(dnssd_t *dnssd, int service);
+ DNSSD_API int dnssd_process_service(dnssd_t *dnssd, int service);
+ 
++/* ParkCast (ADVERTISE stage, AIR-050): the registrations use kDNSServiceFlagsNoAutoRename, so a name
++   conflict comes back as an error instead of a silent rename. The daemon's verdict arrives later, through
++   dnssd_process_service(); set this callback to receive it as (cls, DNSSD_SERVICE_*, errorCode). errorCode
++   is 0 once the name is registered, or a negative dns_sd.h code (-65548 is a name conflict). NULL is
++   allowed: the reply is then dropped, as before. */
++typedef void (*dnssd_register_reply_t)(void *cls, int service, int error_code);
++DNSSD_API void dnssd_set_register_callback(dnssd_t *dnssd, dnssd_register_reply_t callback, void *cls);
++
+ DNSSD_API void dnssd_destroy(dnssd_t *dnssd);
+ 
+ /* p2p support (macOS only) */

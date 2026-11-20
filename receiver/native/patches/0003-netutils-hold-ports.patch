@@ -1,0 +1,118 @@
+diff --git a/lib/netutils.c b/lib/netutils.c
+--- a/lib/netutils.c
++++ b/lib/netutils.c
+@@ -127,6 +127,24 @@ netutils_set_bind_address(const char *ipv4)
+     return 0;
+ }
+ 
++/* ParkCast: sockets held from BIND (five at most: TCP 35000/35001, UDP 35000-35002), keyed by port and type. */
++#define PARKCAST_HOLD_MAX 8
++static struct { unsigned short port; int udp; int fd; } parkcast_held[PARKCAST_HOLD_MAX];
++static int parkcast_held_count = 0;
++static pthread_mutex_t parkcast_held_mutex = PTHREAD_MUTEX_INITIALIZER;
++
++/* Caller holds parkcast_held_mutex. Returns the held fd for (port, udp), or -1. */
++static int
++parkcast_held_fd(unsigned short port, int use_udp)
++{
++    for (int i = 0; i < parkcast_held_count; i++) {
++        if (parkcast_held[i].port == port && parkcast_held[i].udp == (use_udp != 0)) {
++            return parkcast_held[i].fd;
++        }
++    }
++    return -1;
++}
++
+ int
+ netutils_init_socket(unsigned short *port, int use_ipv6, int use_udp)
+ {
+@@ -134,6 +152,16 @@ netutils_init_socket(unsigned short *port, int use_ipv6, int use_udp)
+     if (use_ipv6 || !parkcast_bind_set) {
+         return -1;
+     }
++    /* ParkCast: a port held since BIND is handed out as a dup; closing the dup leaves the hold in place. */
++    if (port && *port) {
++        pthread_mutex_lock(&parkcast_held_mutex);
++        int held = parkcast_held_fd(*port, use_udp);
++        int fd = (held == -1) ? -1 : dup(held);
++        pthread_mutex_unlock(&parkcast_held_mutex);
++        if (held != -1) {
++            return fd;
++        }
++    }
+     int family = use_ipv6 ? AF_INET6 : AF_INET;
+     int type = use_udp ? SOCK_DGRAM : SOCK_STREAM;
+     int proto = use_udp ? IPPROTO_UDP : IPPROTO_TCP;
+@@ -227,6 +255,56 @@ netutils_init_socket(unsigned short *port, int use_ipv6, int use_udp)
+     return -1;
+ }
+ 
++int
++netutils_hold_port(unsigned short port, int use_udp)
++{
++    if (port == 0) {
++        errno = EINVAL;
++        return -1;
++    }
++    pthread_mutex_lock(&parkcast_held_mutex);
++    if (parkcast_held_fd(port, use_udp) != -1) {
++        pthread_mutex_unlock(&parkcast_held_mutex);
++        return 0;
++    }
++    if (parkcast_held_count == PARKCAST_HOLD_MAX) {
++        pthread_mutex_unlock(&parkcast_held_mutex);
++        errno = ENOSPC;
++        return -1;
++    }
++    pthread_mutex_unlock(&parkcast_held_mutex);
++
++    unsigned short p = port;
++    int fd = netutils_init_socket(&p, 0, use_udp);
++    if (fd == -1) {
++        return -1;
++    }
++    if (!use_udp && listen(fd, 1) == -1) {
++        int err = errno;
++        CLOSESOCKET(fd);
++        errno = err;
++        return -1;
++    }
++    pthread_mutex_lock(&parkcast_held_mutex);
++    parkcast_held[parkcast_held_count].port = port;
++    parkcast_held[parkcast_held_count].udp = (use_udp != 0);
++    parkcast_held[parkcast_held_count].fd = fd;
++    parkcast_held_count++;
++    pthread_mutex_unlock(&parkcast_held_mutex);
++    return 0;
++}
++
++void
++netutils_release_ports(void)
++{
++    pthread_mutex_lock(&parkcast_held_mutex);
++    for (int i = 0; i < parkcast_held_count; i++) {
++        CLOSESOCKET(parkcast_held[i].fd);
++    }
++    parkcast_held_count = 0;
++    pthread_mutex_unlock(&parkcast_held_mutex);
++}
++
+ // Src is the ip address
+ int
+ netutils_parse_address(int family, const char *src, void *dst, int dstlen)
+diff --git a/lib/netutils.h b/lib/netutils.h
+--- a/lib/netutils.h
++++ b/lib/netutils.h
+@@ -21,6 +21,12 @@ void netutils_cleanup();
+  * Until it is set, and for every IPv6 socket, netutils_init_socket fails. Returns 0, or -1 for a bad address. */
+ int netutils_set_bind_address(const char *ipv4);
+ int netutils_init_socket(unsigned short *port, int use_ipv6, int use_udp);
++/* ParkCast (BIND stage, AIR-049): bind a socket for this port on the bind address now and keep it, so the
++ * port stays ours from BIND until the session's SETUP. A TCP hold also listens, but never accepts. While a
++ * port is held, netutils_init_socket returns a dup of the held socket for it, so SETUP cannot lose the port.
++ * Returns 0, or -1 with errno set. Release closes every held socket. */
++int netutils_hold_port(unsigned short port, int use_udp);
++void netutils_release_ports(void);
+ unsigned char *netutils_get_address(void *sockaddr, int *length, unsigned int *zone_id, unsigned short *port);
+ int netutils_parse_address(int family, const char *src, void *dst, int dstlen);
+ 
