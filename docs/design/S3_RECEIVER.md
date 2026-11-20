@@ -49,7 +49,7 @@ plain-Java halves of the Android adapters: `ReverseFilter` (action and extras in
 sticky, AIR-060), `ParkCall` (200 ms timeout, class-name failure text, AIR-058), `AccAdapter` (worker
 registration posted back, AIR-059), `RegulationAdapter` (notifications only, AIR-066) and `LogDirFiles`
 (`java.io` rooted at the log dir, AIR-062). The Android classes in `receiver/app` only convert `Intent`,
-`Bundle` and service objects into these halves; the existing `AndroidReverseSource` delegates to
+`Bundle` and service objects into these halves; `ReverseOnBroadcasts` (the app's REVERSE_ON registration) delegates to
 `ReverseFilter`. That split lets the meta profile run on a plain JVM; Robolectric was considered and
 rejected. Tests: glue `parkcast.core.steps`, features 13 and 15 from `specs/java-features.txt`, default tags
 `@S3 and @offline`.
@@ -245,7 +245,10 @@ reads `Pkg.Revision` from the NDK's `source.properties`, fails unless it is `25.
 version found; (2) `CMakeLists.txt` checks `ANDROID_NDK_REVISION` the same way, covering a direct CMake run;
 (3) AGP's `ndkVersion` pin.
 
-**Native prep**, `tools/airplay_s3/native_prep.py`, a Gradle `Exec` task that CMake configure depends on:
+**Native prep**, `tools/airplay_s3/native_prep.py`, run by the app's `nativePrep` Gradle `Exec` task, which every
+`configureCMake*` task depends on. Its Python is `-Pparkcast.python`, else `parkcast.python` in `local.properties`,
+else the repo's `.venv`, else `python` on PATH; it runs on Python 3.8 and later. A download whose TLS chain Python
+cannot verify is retried once through `curl`, HTTPS only and still verifying:
 
 1. Parse `deps.lock`; fail unless OpenSSL is 3.5.x and libplist 2.x (AIR-044(d)).
 2. Download into `.cache/` and verify SHA-256 before extracting; a mismatch fails and nothing is extracted
@@ -356,6 +359,16 @@ publish.
    evidence; the owner records GO, NO-GO or INCONCLUSIVE.
 
 ## Open on-unit risks
+
+Added by the step 4 build (2026-11-20), on top of the list below:
+
+- **Launch**: the activity is not exported; the install script starts it as root with `am start -n`.
+- **Device id**: every unit advertises the same generic device id `02:00:00:00:00:01`.
+- **Crypto failure**: UxPlay's `handle_error()` calls `exit()`, which would end the app process.
+- **ADVERTISE**: blocks its caller for up to 2 s while waiting for the register replies.
+- **Codec data**: an H.264 size change after the first configuration is not sent again.
+- **Thread-local storage**: `__thread` relies on the NDK's emulated TLS below API 29.
+
 
 Each is answered by file 15, or first by a read-only probe under `tools/unit-probes/`.
 

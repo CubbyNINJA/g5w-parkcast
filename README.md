@@ -72,13 +72,16 @@ uv pip install --python .venv/Scripts/python.exe -r requirements-dev.txt
 # fetches UxPlay at its pinned commit and applies receiver/native/patches (into receiver/native/.cache/)
 cd tools && ../.venv/Scripts/python -m airplay_s3.native_prep --lock ../receiver/native/deps.lock     --cache ../receiver/native/.cache --repo ..
 .venv/Scripts/python -m pytest --run-host -m "S3 and host"   # S3 checks on this PC's real build output
+./gradlew :receiver:app:assembleRelease   # the signed S3 APK with libparkcast.so (runs native prep first)
 ```
 
 The S1 PC test (`--run-pc`) needs MSYS2 with UxPlay's build dependencies and an iPhone on the same
 network. `./gradlew test` needs a JDK 17 (set `JAVA_HOME`); the wrapper downloads Gradle and the pinned
 Cucumber jars on first use. If native prep stops with `CERTIFICATE_VERIFY_FAILED`, Windows has not yet
 cached GitHub's intermediate certificate; opening the URL once in a browser or with `curl` fixes it. Never
-turn certificate checks off. S3 `@host` checks skip, naming what is missing, until the app is built. Head-unit (`@unit`) scenarios never run from
+turn certificate checks off. S3 `@host` checks skip, naming what is missing, until the app is built. The APK build needs
+`local.properties` with `sdk.dir`, the signing entries (OD-188) and, if the Python on PATH is older than the
+repo's, `parkcast.python`; it never prints the passwords. Head-unit (`@unit`) scenarios never run from
 the PC: their evidence comes from the probes and logs on the USB stick.
 
 ## Licence
