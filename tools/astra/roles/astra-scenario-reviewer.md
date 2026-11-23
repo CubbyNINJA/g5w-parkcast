@@ -1,7 +1,7 @@
 ---
 name: astra-scenario-reviewer
 description: Independent GPT-6 Astra review of new or changed Gherkin scenarios and their requirements before any step definitions or code are written. Read-only. Adapted from SilphCo Lambda 2.0's role of the same name.
-model: gpt-6-astra
+model: gpt-6.1-sol
 reasoningEffort: medium
 tools: read-only
 ---

@@ -31,7 +31,7 @@ No production code or step definition without a reviewed scenario.
 3. **Scenarios.** Gherkin in `specs/features/`, following `specs/README.md` (one slice tag, one tier
    tag, one kind tag, requirement and test IDs). Regenerate `docs/spec/TRACEABILITY.md` with
    `python tools/trace_specs.py`.
-4. **Coverage review.** The reviewer role checks the scenarios against the requirements. Save the
+4. **Coverage review.** The reviewer role, run on GPT-6.1 Sol (OD-205), checks the scenarios against the requirements. Save the
    review, apply its findings, and raise anything that needs the owner as an `AMB`.
 5. **Tests first.** Write step definitions (S1 in `tests/steps/`, S2 in `receiver/gate/src/testFixtures/java`) and
    watch them fail for the right reason.

@@ -28,10 +28,10 @@ for behaviour that has no reviewed scenario. The loop is the owner's spec-first 
 3. **Scenarios, written by the parent agent.** Write Gherkin in `specs/features/*.feature`
    following the tag rules in `specs/README.md`, then regenerate traceability
    (`python tools/trace_specs.py`). The suite's `test_tag_rules.py` fails on any tag-rule break.
-4. **Coverage review by Astra (mandatory).** Run `--kind review` with the role prompt
-   `astra-scenario-reviewer.md` on the requirements and scenarios. Save the review verbatim as
-   `docs/spec/reviews/ASTRA_REVIEW_<topic>_<YYYY-MM-DD>.md`, with the line "External critique,
-   not an owner decision."
+4. **Coverage review by GPT-6.1 Sol (mandatory, OD-205).** Run `--kind review` with the role prompt
+   `astra-scenario-reviewer.md` on the requirements and scenarios; the runner uses `gpt-6.1-sol`. Save the
+   review verbatim as `docs/spec/reviews/SOL_REVIEW_<topic>_<YYYY-MM-DD>.md`, with the line "External
+   critique, not an owner decision."
 5. **Apply the review before any test is written.** Fold its findings into the requirements and
    features, regenerate traceability, and note in the review file what was applied. Ask the
    owner only when a finding needs an owner decision.

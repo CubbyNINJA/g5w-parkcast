@@ -1,4 +1,5 @@
-"""Run GPT-6 Astra through the Codex CLI (AGENTS.md loop steps 2 and 4) and save its output with a header.
+"""Run the external author and reviewer through the Codex CLI (AGENTS.md loop steps 2 and 4): GPT-6 Astra drafts
+requirements and GPT-6.1 Sol reviews coverage (OD-205) and save its output with a header.
 
 Adapted from SilphCo Lambda 2.0's tools/astra/run.py. It stages a read-only copy, fills the prompt's STAGE_ROOT
 placeholder, runs `codex exec` read-only with the role prompt as developer instructions, keeps the raw events, and
@@ -26,14 +27,15 @@ ROOT = Path(__file__).resolve().parents[2]
 ROLES = Path(__file__).resolve().with_name("roles")
 REVIEWS = ROOT / "docs" / "spec" / "reviews"
 WORK = ROOT / ".astra"
-MODEL, EFFORT = "gpt-6-astra", "medium"
-FLAGS = ["--json", "-m", MODEL, "-c", f'model_reasoning_effort="{EFFORT}"', "-s", "read-only",
+EFFORT = "medium"
+# Astra drafts requirements; GPT-6.1 Sol runs the coverage reviews (OD-205).
+FLAGS = ["--json", "-c", f'model_reasoning_effort="{EFFORT}"', "-s", "read-only",
          "-c", 'approval_policy="never"', "-c", 'windows.sandbox="elevated"', "--ignore-user-config",
          "--skip-git-repo-check"]
 KINDS = {
-    "requirements": dict(role="astra-requirements-author", prefix="ASTRA_REQUIREMENTS", who="Author",
+    "requirements": dict(model="gpt-6-astra", role="astra-requirements-author", prefix="ASTRA_REQUIREMENTS", who="Author",
                          line="Drafted specification, not an owner decision."),
-    "review": dict(role="astra-scenario-reviewer", prefix="ASTRA_REVIEW", who="Reviewer",
+    "review": dict(model="gpt-6.1-sol", role="astra-scenario-reviewer", prefix="SOL_REVIEW", who="Reviewer",
                    line="External critique, not an owner decision."),
 }
 STAGE_DIRS = ("docs", "specs", "tests", "tools", "package")
@@ -103,9 +105,9 @@ def main() -> int:
     raw = WORK / f"raw-{a.kind}-{a.topic}"
     raw.mkdir(parents=True, exist_ok=True)
     last = raw / "last_message.md"
-    cmd = [codex_exe(), "exec", *FLAGS, "-o", str(last), "-C", str(stg),
+    cmd = [codex_exe(), "exec", "-m", k["model"], *FLAGS, "-o", str(last), "-C", str(stg),
            "-c", f"developer_instructions={json.dumps(role)}", "-"]
-    print("codex", " ".join(FLAGS), "-o", last, "-C", stg, "-c developer_instructions=<role prompt> -")
+    print("codex -m", k["model"], " ".join(FLAGS), "-o", last, "-C", stg, "-c developer_instructions=<role prompt> -")
     if a.dry_run:
         return 0
     start = time.monotonic()
@@ -127,7 +129,7 @@ def main() -> int:
     dest = REVIEWS / f"{k['prefix']}_{a.topic}_{today}.md"
     u = r["usage"]
     header = (f"# {a.title}\n\n"
-              f"> {k['who']}: `{MODEL}` via Codex CLI (`codex exec` read-only sandbox, role prompt "
+              f"> {k['who']}: `{k['model']}` via Codex CLI (`codex exec` read-only sandbox, role prompt "
               f"`tools/astra/roles/{k['role']}.md` as developer instructions), reasoning effort {EFFORT}.\n"
               f"> Staged: {', '.join(STAGE_DIRS)}, AGENTS.md"
               f"{' + evidence: ' + ', '.join(Path(i).name for i in a.include) if a.include else ''}.\n"

@@ -3,25 +3,29 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
   The first on-unit run connected but no video reached the app, and every UxPlay line was withheld
   (docs/evidence/S3_FIRST_RUN_FINDINGS.md). OD-198 adds a build-time setting that writes UxPlay's own
   log, redacted for keys, to a raw file in the app's data folder, with counters, and has the
-  parkcast-diag stick tool copy it (AIR-084 to AIR-089; OD-198 to OD-203). The receiver's normal log
+  parkcast-diag stick tool copy it (AIR-084 to AIR-089; OD-198 to OD-204). The receiver's normal log
   and its filter are unchanged.
 
   The raw file's logic is native C. `@host` scenarios compile the raw-file module, the native log
-  path and the ring for this PC with MSYS2's gcc from the same sources the APK uses, and drive them
-  through a test harness with a fake clock and a fake file layer that records each open's mode and
-  can fail on request. `@offline` scenarios use synthetic fixtures and fake toolbox commands only.
-  No fixture holds a real iPhone name, IP address, MAC address or key.
+  path and the ring for this PC with MSYS2's gcc from the same sources the APK uses. The harness
+  supplies a fake clock and a fake file layer that records every open (path, mode, flags), write
+  and close with the calling thread, and can fail an open or a write, or write short, on request.
+  The ring's push is wrapped at link time so every push is recorded with its thread and whether the
+  ring's lock was held by a raw-file call. `@offline` scenarios use synthetic fixtures and fake
+  toolbox commands that journal every command, read, copy and change. No fixture holds a real
+  iPhone name, IP address, MAC address or key.
 
   A raw record line is `<uptime ms> L<level> <text>` (AIR-085(b)). A counter line is
   `<uptime ms> counters gen=<g> au_in=<n> csd_sent=<n> au_ring_drops=<n> log_ring_drops=<n>
-  control_drops=<n> raw_written=<n> raw_dropped=<n>` (AIR-086(b)).
+  control_drops=<n> raw_written=<n> raw_dropped=<n>` (AIR-086(b)). In expected lines below, `\n`,
+  `\r` and `\\` are the two-character escapes the raw file holds, not control bytes.
 
   # --- AIR-084: the build switch and the keep check
 
   @host @failure @AIR-084 @AT-84 @OD-199
   Scenario: A property value other than true or false fails the build and names the value
-    When the app's Gradle build is configured with "-Pparkcast.rawDiagnostics=maybe"
-    Then the build fails
+    When "./gradlew :receiver:app:help -Pparkcast.rawDiagnostics=maybe" runs
+    Then it fails
     And its error output names the value "maybe"
 
   @host @normal @AIR-084 @AT-84 @OD-199
@@ -31,68 +35,78 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     And its "libparkcast.so" holds the string "parkcast raw diagnostics on"
     And the APKs built with the property absent and with "false" have neither the suffix nor the string
 
-  @offline @failure @AIR-084 @AT-84 @OD-199
-  Scenario Outline: The keep check refuses a raw-diagnostics build and names why
-    Given a fixture APK whose version name is "<version>" and whose library <library>
-    When the keep check runs on it
-    Then the keep check fails
-    And its report names "<reason>"
+  @host @normal @AIR-084 @AT-84 @OD-199
+  Scenario: There is no runtime switch
+    Given the receiver's native and app sources in the repository
+    Then the native sources export only the JNI contract's entry points
+    And the app's sources read no setting, property or file that turns raw diagnostics on or off
+
+  @offline @normal @AIR-084 @AT-84 @OD-199 @OD-204
+  Scenario Outline: The keep check reports every reason that applies
+    Given a fixture APK whose version name is "<version>" and whose library <library> the string "parkcast raw diagnostics on"
+    When "tools/s3.py keep-check" runs on it
+    Then it <result>
+    And its report names exactly the reasons "<reasons>"
 
     Examples:
-      | version        | library                                         | reason                       |
-      | 0.3.0-rawdiag  | holds the string "parkcast raw diagnostics on"  | version name                 |
-      | 0.3.0          | holds the string "parkcast raw diagnostics on"  | native library               |
-      | 0.3.0-rawdiag  | does not hold the string                        | version name and library disagree |
-
-  @offline @normal @AIR-084 @AT-84 @OD-199
-  Scenario: The keep check passes a build without raw diagnostics
-    Given a fixture APK whose version name is "0.3.0" and whose library does not hold the string
-    When the keep check runs on it
-    Then the keep check passes
+      | version       | library      | result | reasons                       |
+      | 0.3.0         | doesn't hold | passes |                               |
+      | 0.3.0-rawdiag | holds        | fails  | version name, native library  |
+      | 0.3.0-rawdiag | doesn't hold | fails  | version name, disagreement    |
+      | 0.3.0         | holds        | fails  | native library, disagreement  |
 
   # --- AIR-085: the raw file
+
+  @host @normal @AIR-055 @AIR-072 @AIR-085 @AT-55 @AT-72 @AT-85 @OD-198
+  Scenario: The callback's own thread writes the raw line before the ring push
+    Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
+    When UxPlay's log callback is called on a harness thread with level 7 and the text "CSeq: 3"
+    Then that thread wrote the raw line "<uptime> L7 CSeq: 3" before it pushed to the ring
+    And the write finished before the callback returned
+    And the ring received exactly one log event with level 7 and the text "CSeq: 3"
 
   @host @normal @AIR-085 @AT-85 @OD-203
   Scenario: A record is one line, with control bytes escaped
     Given the raw-file module is opened at uptime 1000 ms
     When a record at level 7 arrives at 1234 ms with the text "SETUP 1" followed by CR, LF, a backslash and the byte 0x01
     Then the raw file holds the line "1234 L7 SETUP 1\r\n\\\x01"
-    And that record ends with one LF and adds exactly one line
+    And that record adds exactly one line, ending in one LF
 
   @host @failure @AIR-085 @AT-85 @OD-200
   Scenario Outline: Key material in a record is redacted in place
-    Given the raw-file module is opened with the fake key file path "/data/data/parkcast.receiver/files/fake.key"
-    When a record arrives with the text "before <material> after"
-    Then the raw file's line for it ends with "before [redacted] after"
-    And no part of "<material>" is in the raw file
+    Given the raw-file module is opened
+    When a record at level 7 arrives with the text "before <material> after"
+    Then the raw file's line for it is "<uptime> L7 before <written> after"
 
     Examples:
-      | material                                                        |
-      | 0123456789abcdef0123456789abcdef                                |
-      | QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZn                    |
-      | 0a 1b 2c 3d 4e 5f 6a 7b                                         |
-      | /data/data/parkcast.receiver/files/fake.key                     |
-      | fake.key                                                        |
+      | material                                     | written                     |
+      | 0123456789abcdef0123456789abcdef             | [redacted]                  |
+      | QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZn | [redacted]                  |
+      | <data>MDEyMzQ1Njc4OWFiY2RlZg==</data>        | <data>[redacted]</data>     |
+      | PIN = "1234"                                 | PIN = [redacted]            |
 
-  @host @failure @AIR-085 @AT-85 @OD-200
-  Scenario: A byte dump split over two lines is redacted whole
-    Given the raw-file module is opened
-    When a record arrives with the text "72 byte ekey:" then LF, then "0a 1b 2c 3d" then LF, then "4e 5f 6a 7b " then LF
-    Then the raw file's line for it is "<uptime> L7 72 byte ekey:\n[redacted]" with nothing after the redaction but escaped line breaks
-    And none of the eight hex bytes is in the raw file
+  @host @failure @AIR-083 @AIR-085 @AT-83 @AT-85 @OD-200
+  Scenario Outline: The identity key file's path and name are redacted
+    Given the raw-file module is opened with the fake key file path "/fake/files/fake.key"
+    When a record at level 7 arrives with the text "before <material> after"
+    Then the raw file's line for it is "<uptime> L7 before [redacted] after"
 
-  @host @failure @AIR-085 @AT-85 @OD-200
-  Scenario: The quoted PIN value is redacted
+    Examples:
+      | material             |
+      | /fake/files/fake.key |
+      | fake.key             |
+
+  @host @failure @AIR-085 @AT-85 @OD-200 @OD-204
+  Scenario: A byte dump in UxPlay's layout is redacted, keeping the separators after it
     Given the raw-file module is opened
-    When a record arrives with the text "*** CLIENT MUST NOW ENTER PIN = \"1234\" AS AIRPLAY PASSWORD"
-    Then the raw file's line for it ends with "PIN = [redacted] AS AIRPLAY PASSWORD"
-    And "1234" is not in the raw file
+    When a record at level 7 arrives with the text "72 byte ekey:" LF "0a 1b 2c 3d " LF "4e 5f 6a 7b " LF
+    Then the raw file's line for it is "<uptime> L7 72 byte ekey:\n[redacted] \n"
 
   @host @boundary @AIR-085 @AT-85 @OD-200
   Scenario Outline: Material just under each threshold is written unchanged
     Given the raw-file module is opened
-    When a record arrives with the text "before <material> after"
-    Then the raw file's line for it ends with "before <material> after"
+    When a record at level 7 arrives with the text "before <material> after"
+    Then the raw file's line for it is "<uptime> L7 before <material> after"
 
     Examples:
       | material                                    |
@@ -101,40 +115,60 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
       | 0a 1b 2c 3d 4e 5f 6a                        |
 
   @host @normal @AIR-085 @AT-85 @OD-203
-  Scenario: The raw file is created owner-only next to the key file and truncated at each app start
+  Scenario: The raw file is opened owner-only next to the key file, truncated, and the key file is never opened
     Given the raw-file module is opened with the fake key file path "/fake/files/fake.key"
-    Then the fake file layer recorded one open of "/fake/files/uxplay-raw.log" with mode 0600 and truncation
-    When a record arrives with the text "first start"
-    And the raw-file module is closed and opened again
-    Then the raw file does not hold "first start"
+    Then the fake file layer recorded exactly one open, of "/fake/files/uxplay-raw.log", with mode 0600 and truncation
+    And it recorded no open of "/fake/files/fake.key"
+
+  @host @normal @AIR-085 @AT-85 @OD-203
+  Scenario: KEYCHECK opens the raw file after the stdio redirect and before raop_init
+    Given the native source "receiver/native/src/host.c"
+    When its KEYCHECK stage is read
+    Then the raw-file open comes after the stdio redirect's "dup2" calls and before "raop_init"
 
   @host @failure @AIR-085 @AT-85 @OD-199
-  Scenario: With the setting off, the raw file is never created or touched
+  Scenario: With the setting off, the raw file is never opened
     Given the native log path is compiled with raw diagnostics off
-    And a file "uxplay-raw.log" already exists in the fake key file's folder with known bytes
-    When the KEYCHECK stage's raw-file step runs and a record arrives
-    Then the fake file layer recorded no open of "uxplay-raw.log"
-    And the existing file's bytes are unchanged
+    When the raw-file module is opened with the fake key file path "/fake/files/fake.key"
+    And UxPlay's log callback is called with the text "SETUP 1"
+    Then the fake file layer recorded no open
+    And the ring received one log event with the text "SETUP 1"
 
   @host @normal @AIR-072 @AIR-085 @AT-72 @AT-85 @OD-198
   Scenario: A full ring can't hide a record from the raw file
-    Given the native log path and the ring are compiled with raw diagnostics on
-    And the ring's general slots are all taken and its delivery is stopped
+    Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
+    And the ring's 64 general slots are full
     When UxPlay's log callback is called with the text "Mirroring not initialized at SETUP, playing will fail!"
     Then the raw file holds a line ending with "Mirroring not initialized at SETUP, playing will fail!"
     And the ring's log drop count has risen by one
 
   @host @normal @AIR-055 @AIR-073 @AT-55 @AT-73 @OD-198
   Scenario: The raw write doesn't change what the ring passes to the filter
-    Given the native log path and the ring are compiled with raw diagnostics on
+    Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
     When UxPlay's log callback is called with each of these texts
-      | text                                          |
-      | Mirroring initialized successfully            |
-      | CSeq: 3                                       |
-      | 16 byte aesiv (needed for AES-CBC audio decryption iv): |
-      | 0a 1b 2c 3d 4e 5f 6a 7b                        |
-    Then the ring holds one log event per text, each with the text exactly as given, unredacted
-    And the events are the same as the native log path pushes with raw diagnostics off
+      | text                                                     |
+      | Mirroring initialized successfully                       |
+      | connection from fake-iphone-name                         |
+      | deviceid 02:00:00:00:00:aa                               |
+      | client at 192.0.2.10 and 2001:db8::10                    |
+      | something unknown                                        |
+      | *** CLIENT MUST NOW ENTER PIN = "1234" AS AIRPLAY PASSWORD |
+      | User-Agent: AirPlay/000.0                                |
+      | CSeq: 3                                                  |
+      | X-Apple-ProtocolVersion: 1                               |
+      | <?xml version="1.0"?><plist><dict></dict></plist>        |
+      | 16 byte aesiv (needed for AES-CBC audio decryption iv):  |
+      | ekey 0a1b2c3d                                            |
+      | aeskey 0a1b2c3d                                          |
+      | ecdh 0a1b2c3d                                            |
+      | fake.key                                                 |
+      | line one LF line two                                     |
+      | byte 0x01 here                                           |
+      | 0123456789abcdef0123456789abcdef                         |
+      | QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZn             |
+    Then the ring holds one log event per text, in order, each with the text exactly as given
+    And those events are the same as the native log path pushes when compiled with raw diagnostics off
+    And the raw file holds one record line per text
 
   # --- AIR-086: counters
 
@@ -143,140 +177,196 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Given the raw-file module is opened at uptime 1000 ms
     Then the raw file's first line is a counter line at 1000 ms
     When records arrive at 1400, 1800, 2200 and 2600 ms
-    Then a counter line at 2200 ms comes before the record at 2200 ms
-    And no other counter line was written between 1000 and 2600 ms
+    Then between 1000 and 2600 ms the only other counter line is at 2200 ms
     When the session ends at 2700 ms
     And stop's last phase runs at 2800 ms
     Then counter lines at 2700 ms and 2800 ms are written
 
+  @host @boundary @AIR-086 @AT-86 @OD-204
+  Scenario: An event without a record writes the counter line at exactly 1,000 ms
+    Given the raw-file module is opened at uptime 1000 ms
+    When "video_process" is called at 1999 ms
+    Then no counter line is written at 1999 ms
+    When "video_process" is called at 2000 ms
+    Then exactly one counter line is written at 2000 ms
+
   @host @normal @AIR-086 @AT-86 @OD-201
-  Scenario: The counts match the calls, before any check, and count only configurations the ring took
-    Given the native log path and the ring are compiled with raw diagnostics on
-    When "video_process" is called 3 times with a non-empty access unit and no codec data has been seen
-    And the ring's general slots are all taken
-    And a codec configuration is pushed
-    And the ring is emptied
-    And a codec configuration is pushed
-    Then the last counter line has "au_in=3" and "csd_sent=1"
+  Scenario Outline: Each count moves exactly as the calls made
+    Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
+    And the raw-file module is opened at uptime 1000 ms in generation 1
+    When <actions>
+    And the session ends
+    Then the session-end counter line is "gen=1 au_in=<au_in> csd_sent=<csd> au_ring_drops=<aud> log_ring_drops=<logd> control_drops=<ctl> raw_written=<rw> raw_dropped=<rd>"
+
+    Examples:
+      | actions                                                                      | au_in | csd | aud | logd | ctl | rw | rd |
+      | "video_process" is called 3 times with a non-empty access unit before any codec data | 3 | 0 | 0 | 0 | 0 | 0 | 0 |
+      | the 64 general slots are filled and a codec configuration is pushed          | 0     | 1   | 0   | 0    | 0   | 0  | 0  |
+      | all 72 slots are filled and a codec configuration is pushed                  | 0     | 0   | 0   | 0    | 1   | 0  | 0  |
+      | the 64 general slots are filled, an access unit is pushed and a record arrives | 0   | 0   | 1   | 1    | 0   | 1  | 0  |
+      | two records arrive and one record of 65,537 escaped bytes arrives            | 0     | 0   | 0   | 0    | 0   | 2  | 1  |
+
+  @host @failure @AIR-086 @AT-86 @OD-201
+  Scenario: A refused codec configuration is a reported breach of OD-190
+    Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
+    And all 72 ring slots are full
+    When a codec configuration is pushed
+    And the session ends
+    Then the session-end counter line has "csd_sent=0" and "control_drops=1"
 
   @host @boundary @AIR-086 @AT-86 @OD-201
-  Scenario: Counts carry over a session end and start again only at app start
-    Given the native log path is compiled with raw diagnostics on
-    And "video_process" was called 2 times with a non-empty access unit in session 1
-    When session 1 ends and session 2 starts
-    And "video_process" is called once with a non-empty access unit
-    Then the last counter line has "au_in=3"
-    When the raw-file module is closed and opened again
-    Then the first counter line has "au_in=0"
+  Scenario: Counts carry over a session end and start from zero at the next app start
+    Given the native log path and the ring are compiled with raw diagnostics on
+    And "video_process" was called 2 times with a non-empty access unit, then the session ended
+    When the session ends again with no event between
+    Then that session-end counter line has "au_in=2"
+    When the native side is stopped and a new app start opens the raw-file module
+    Then its first counter line has "au_in=0 csd_sent=0 au_ring_drops=0 log_ring_drops=0 control_drops=0 raw_written=0 raw_dropped=0"
 
   # --- AIR-087: the cap
 
-  @host @boundary @AIR-087 @AT-87 @OD-201
-  Scenario: At the cap the file keeps its start and ends with one "raw log full" line
+  @host @boundary @AIR-087 @AT-87 @OD-201 @OD-204
+  Scenario: At the cap the file keeps its start, ends with one "raw log full" line, and then never changes
     Given the raw-file module is opened
     And its first record is "first record"
     When records are written until the file is exactly 16,776,704 bytes
     And one more record arrives
-    Then the raw file's last line starts with the uptime and "raw log full" and carries the counter fields
+    Then the raw file's last line is the uptime, "raw log full" and the counter fields
     And the raw file is no larger than 16,777,216 bytes
     And its first record line still ends with "first record"
-    When another record arrives
-    Then the raw file is unchanged
+    When a record arrives, a counter event comes due, the session ends and stop's last phase runs
+    Then the raw file is byte for byte unchanged
 
-  @host @boundary @AIR-087 @AT-87 @OD-203
-  Scenario: A record of 65,536 escaped bytes is written and one byte more is dropped
+  @host @boundary @AIR-087 @AT-87 @OD-204
+  Scenario: A counter line that would cross the reserve gives the final line instead
+    Given the raw-file module is opened
+    And records are written until fewer bytes remain below 16,776,704 than a counter line needs
+    When a counter line comes due
+    Then the raw file's last line is the uptime, "raw log full" and the counter fields
+    And the raw file is no larger than 16,777,216 bytes
+
+  @host @boundary @AIR-087 @AT-87 @OD-204
+  Scenario: A record whose escaped text is 65,536 bytes is written and one byte more is dropped
     Given the raw-file module is opened
     When a record arrives whose escaped text is 65,536 bytes long
     And a record arrives whose escaped text is 65,537 bytes long
     Then the raw file holds the first record and no part of the second
-    And the next counter line has "raw_dropped=1"
+    And the next counter line has "raw_written=1" and "raw_dropped=1"
 
   # --- AIR-088: failures
 
   @host @failure @AIR-088 @AT-88 @OD-201
-  Scenario Outline: A raw-file failure stops raw writes for the rest of the app start
-    Given the fake file layer fails with <failure>
+  Scenario Outline: A raw-file failure stops raw writes until the next app start
+    Given the fake file layer will fail with <failure> at the <when> record
     And the raw-file module is opened
-    When three records arrive
-    Then the fake file layer recorded no write after the failure
-    And no other file was opened
+    When five records arrive, the session ends and stop's last phase runs
+    Then the fake file layer recorded no write, reopen or other open after the failure
+    When a new app start opens the raw-file module with the fake file layer working
+    And a record arrives
+    Then that record is written
 
     Examples:
-      | failure                        |
-      | an open failure                |
-      | a failed first write           |
-      | a short first write            |
+      | failure          | when   |
+      | an open failure  | first  |
+      | a failed write   | first  |
+      | a short write    | first  |
+      | a failed write   | third  |
+      | a short write    | third  |
 
   @host @normal @AIR-088 @AT-88 @OD-203
   Scenario: While raw writes fail, the native log path still pushes every record and reports nothing
-    Given the native log path and the ring are compiled with raw diagnostics on
+    Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
     And the fake file layer fails every write
+    And a watchdog of 5 seconds guards the test
     When UxPlay's log callback is called with 3 records
-    Then each call returns without blocking
-    And the ring holds the same 3 log events it would hold with raw writes working
-    And no other event was pushed
+    Then each call returned
+    And the ring holds the same 3 log events it would hold with raw writes working, and no other event
+    And the wrapped ring recorded no raw-file call made while its lock was held
 
   # --- AIR-089: the parkcast-diag stick tool
 
-  @offline @normal @AIR-089 @AT-89 @OD-202 @OD-203
-  Scenario: The tool copies the raw file and both logs into a new timestamped folder and changes nothing
-    Given a fake unit tree with ParkCast running, "uxplay-raw.log" and a key file in its app data, and "receiver.log" and "receiver.log.1" in its log folder
+  @offline @normal @AIR-083 @AIR-089 @AT-83 @AT-89 @OD-202 @OD-203
+  Scenario: The tool copies the raw file and both logs into a new folder, and reads nothing else in app data
+    Given a fake unit tree with ParkCast running
+    And its app data holds "uxplay-raw.log", a key file "fake.key" and another file "other.bin"
+    And its log folder holds "receiver.log" and "receiver.log.1"
+    And ParkCast's descriptor list points at each of those app-data files
     When the parkcast-diag script runs from the fake stick
-    Then a new folder "NEMESIS-diag/parkcast-diag/<timestamp>/" holds copies of "uxplay-raw.log", "receiver.log" and "receiver.log.1"
-    And every source file's hash and mode are unchanged
-    And no file the script wrote lists app-data file names or holds the key file's name
-    And no file on the fake stick ever held unfiltered logcat
+    Then a new folder "NEMESIS-diag/parkcast-diag/<timestamp>/" holds copies of "uxplay-raw.log", "receiver.log" and "receiver.log.1" and a listing of the log folder
+    And the journal holds no read of "fake.key" or "other.bin" and no change on the unit
+    And no file on the fake stick holds the text "fake.key", the key file's path or bytes, or "other.bin"
+    And the script's log ends with "parkcast diag end"
     And the script exits 0
 
   @offline @normal @AIR-089 @AT-89 @OD-202
-  Scenario Outline: The tool starts ParkCast only when it isn't running
+  Scenario: No unfiltered logcat ever lands on the stick, even for a moment
+    Given a fake unit tree with ParkCast running
+    And the fake "logcat" puts the sentinel line "UNFILTERED-SENTINEL" in every unfiltered output
+    And the fake "rm" records deletions and keeps the file
+    When the parkcast-diag script runs from the fake stick
+    Then no file on the fake stick holds "UNFILTERED-SENTINEL"
+    And the fake "logcat" was never asked to write to a file
+
+  @offline @normal @AIR-089 @AT-89 @OD-202
+  Scenario Outline: Starting ParkCast is the only change, and only when it isn't running
     Given a fake unit tree with ParkCast <state>
     When the parkcast-diag script runs from the fake stick
-    Then the fake "am" recorded <starts>
+    Then the journal's changes on the unit are <changes>
 
     Examples:
-      | state       | starts                                                   |
-      | not running | exactly one "start -n parkcast.receiver/.ReceiverActivity" |
-      | running     | no "start" call                                          |
+      | state       | changes                                                       |
+      | not running | exactly one "am start -n parkcast.receiver/.ReceiverActivity" |
+      | running     | none                                                          |
 
-  @offline @failure @AIR-089 @AT-89
-  Scenario: A missing raw file is reported by name
-    Given a fake unit tree with ParkCast running and no "uxplay-raw.log" in its app data
+  @offline @failure @AIR-089 @AT-89 @OD-204
+  Scenario Outline: A source that is missing, fails to copy or is a symlink fails alone
+    Given a fake unit tree with ParkCast running and all three sources
+    And "<source>" <problem>
     When the parkcast-diag script runs from the fake stick
-    Then its log says "no uxplay-raw.log"
-    And "receiver.log" is still copied
-
-  @offline @failure @AIR-089 @AT-89
-  Scenario: A failing copy is reported, the other copies still run, and the script exits non-zero
-    Given a fake unit tree with ParkCast running and all three source files
-    And the fake "cp" fails for "uxplay-raw.log"
-    When the parkcast-diag script runs from the fake stick
-    Then its log reports the failed copy of "uxplay-raw.log"
-    And "receiver.log" and "receiver.log.1" are copied
+    Then its log reports "<report>"
+    And the other two sources are copied
+    And the journal holds no read through a symlink
     And the script exits non-zero
 
-  @offline @failure @AIR-089 @AT-89
-  Scenario: A symlink at the raw file's path is not followed
-    Given a fake unit tree where "uxplay-raw.log" in ParkCast's app data is a symlink to the key file
+    Examples:
+      | source         | problem                                 | report                         |
+      | uxplay-raw.log | is missing                              | no uxplay-raw.log              |
+      | receiver.log   | is missing                              | no receiver.log                |
+      | uxplay-raw.log | fails to copy                           | copy failed uxplay-raw.log     |
+      | receiver.log.1 | fails to copy                           | copy failed receiver.log.1     |
+      | uxplay-raw.log | is a symlink to a sentinel file         | symlink uxplay-raw.log         |
+      | receiver.log   | is a symlink to a sentinel file         | symlink receiver.log           |
+
+  @offline @failure @AIR-089 @AT-89 @OD-204
+  Scenario: An output folder that already exists is left alone
+    Given a fake unit tree with ParkCast running and all three sources
+    And the stick already holds the folder the script would make, with a file in it
     When the parkcast-diag script runs from the fake stick
-    Then the stick holds no copy of the key file's bytes
-    And its log reports that the raw file's path is a symlink
+    Then that folder's contents are unchanged
+    And no source was copied
     And the script exits non-zero
 
-  @offline @failure @AIR-089 @AT-89
-  Scenario: Another firmware build is refused with nothing read
+  @offline @failure @AIR-089 @AT-89 @OD-204
+  Scenario: Another firmware build is refused before any source is read
     Given a fake unit tree whose build is not "eng.vmadmin.20260206.060005"
+    And the stick's root "NEMESIS.data" is the tool's own
     When the parkcast-diag script runs from the fake stick
-    Then its log says the guard failed
-    And no file was copied and no "am" call was made
+    Then the root "NEMESIS.data" is gone
+    And its log says the guard failed
+    And the journal holds no source read, no copy and no "am" call
     And the script exits non-zero
 
-  @offline @normal @AIR-083 @AIR-089 @AT-83 @AT-89
-  Scenario: The tool never copies or names the key file
-    Given a fake unit tree with ParkCast running and a key file "fake.key" in its app data
-    When the parkcast-diag script runs from the fake stick
-    Then no file on the fake stick has the key file's bytes
-    And no file on the fake stick holds the text "fake.key"
+  @host @normal @AIR-089 @AT-89
+  Scenario: The PC keeps the tool's output out of git
+    Given the repository
+    Then a file under "runs/" is ignored by git
+
+  @offline @normal @AIR-089 @AIR-075 @AT-89 @AT-75
+  Scenario: Raw-file lines never count as the evaluator's evidence
+    Given a synthetic stick copy of one run judged as a unit run
+    And the same run folder with a "uxplay-raw.log" holding "parkcast start", "parkcast stop" and "Mirroring initialized successfully"
+    When the evaluator judges both
+    Then the two verdicts and summaries are the same
 
   # --- On the unit (evidence from the stick; never run from the PC suite)
 
@@ -284,14 +374,14 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
   Scenario: The copied raw file holds UxPlay's records and counter lines from the session
     Given the stick copy from a parkcast-diag run with a raw-diagnostics build, during which the iPhone cast
     Then "uxplay-raw.log" holds records from UxPlay during the session and counter lines
-    And the owner finds no unredacted run of 32 or more hex digits, of 44 or more base64 characters, or of 8 spaced hex bytes in it
+    And the owner finds in it no unredacted run of 32 or more hex digits, of 44 or more base64 characters, `<data>` value, byte dump, PIN value, or the key file's path or name
 
   @unit @normal @AIR-062 @AIR-089 @AT-62 @AT-89
   Scenario: The raw file stays in app data and the tool's copy lands in a timestamped folder
     Given the stick after a parkcast-diag run
     Then its copy is in "NEMESIS-diag/parkcast-diag/<timestamp>/"
     And the root "NEMESIS.data" is gone
-    And the copied receiver log folder holds no "uxplay-raw.log"
+    And the copied listing of the receiver's log folder shows no "uxplay-raw.log"
 
   @unit @normal @AIR-072 @AT-72
   Scenario: UxPlay's setup lines count only when they are in the receiver's log
