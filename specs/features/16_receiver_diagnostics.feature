@@ -10,8 +10,9 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
   path and the ring for this PC with MSYS2's gcc from the same sources the APK uses. The harness
   supplies a fake clock and a fake file layer that records every open (path, mode, flags), write
   and close with the calling thread, and can fail an open or a write, or write short, on request.
-  The ring's push is wrapped at link time so every push is recorded with its thread and whether the
-  ring's lock was held by a raw-file call. `@offline` scenarios use synthetic fixtures and fake
+  The ring's push is wrapped at link time so every push is recorded with its thread, and
+  `pthread_mutex_lock` and `pthread_mutex_unlock` are wrapped too, so the harness knows which mutexes
+  each thread holds at every raw-file operation. `@offline` scenarios use synthetic fixtures and fake
   toolbox commands that journal every command, read, copy and change. No fixture holds a real
   iPhone name, IP address, MAC address or key.
 
@@ -113,6 +114,12 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     When a record at level 7 arrives with the text "72 byte ekey:" LF "0a 1b 2c 3d " LF "4e 5f 6a 7b " LF
     Then the raw file's line for it is "<uptime> L7 72 byte ekey:\n[redacted] \n"
 
+  @host @boundary @AIR-085 @AT-85 @OD-200 @OD-204
+  Scenario: Two different kinds of material that touch give one marker
+    Given the raw-file module is opened with the fake key file path "/fake/files/key.fixture"
+    When a record at level 7 arrives with the text "before 0123456789abcdef0123456789abcdefkey.fixture after"
+    Then the raw file's line for it is "<uptime> L7 before [redacted] after"
+
   @host @failure @AIR-085 @AT-85 @OD-200 @OD-204
   Scenario: A <data> value that spans lines is redacted between the tags
     Given the raw-file module is opened
@@ -209,11 +216,11 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     When "video_process" is called at 2000 ms
     Then exactly one counter line is written at 2000 ms
 
-  In the counter scenarios below, "fixture events" are pushed straight into the ring, where no count
-  measures them, and are emptied out again before the session-end callback runs, so the session-end
-  event is never itself dropped. "video_process", the codec-configuration push, the log callback and
-  the session-end callback are the native path's own entry points, which `host.c`'s UxPlay callbacks
-  call. Expected counter lines are compared whole, uptime included.
+  # In the counter scenarios below, "fixture events" are pushed straight into the ring, where no count
+  # measures them, and are emptied out again before the session-end callback runs, so the session-end
+  # event is never itself dropped. "video_process", the codec-configuration push, the log callback and
+  # the session-end callback are the native path's own entry points, which host.c's UxPlay callbacks
+  # call. Expected counter lines are compared whole, uptime included.
 
   @host @normal @AIR-086 @AT-86 @OD-201
   Scenario Outline: Each count moves exactly as the calls made
@@ -303,6 +310,8 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
       | an open failure  | the app start's open            |
       | a failed write   | the open's counter line         |
       | a short write    | the open's counter line         |
+      | a failed write   | the first record's line         |
+      | a short write    | the first record's line         |
       | a failed write   | the third record's line         |
       | a short write    | the third record's line         |
 
@@ -314,7 +323,7 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     When UxPlay's log callback is called with 3 records
     Then each call returned
     And the ring holds the same 3 log events it would hold with raw writes working, and no other event
-    And the wrapped ring recorded no raw-file call made while its lock was held
+    And at no raw-file operation did the calling thread hold any mutex but the raw-file module's own
 
   # --- AIR-089: the parkcast-diag stick tool
 
@@ -368,22 +377,29 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Given a fake unit tree with ParkCast running and all three sources
     And "<source>" <problem>
     When the parkcast-diag script runs from the fake stick
-    Then its log reports "<report>"
+    Then its log has a failure line naming "<source>"
     And the other two sources are copied
     And the journal holds no read through a symlink
     And the script exits non-zero
 
     Examples:
-      | source         | problem                                 | report                         |
-      | uxplay-raw.log | is missing                              | no uxplay-raw.log              |
-      | receiver.log   | is missing                              | no receiver.log                |
-      | receiver.log.1 | is missing                              | no receiver.log.1              |
-      | uxplay-raw.log | fails to copy                           | copy failed uxplay-raw.log     |
-      | receiver.log   | fails to copy                           | copy failed receiver.log       |
-      | receiver.log.1 | fails to copy                           | copy failed receiver.log.1     |
-      | uxplay-raw.log | is a symlink to a sentinel file         | symlink uxplay-raw.log         |
-      | receiver.log   | is a symlink to a sentinel file         | symlink receiver.log           |
-      | receiver.log.1 | is a symlink to a sentinel file         | symlink receiver.log.1         |
+      | source         | problem                                 |
+      | receiver.log   | is missing                              |
+      | receiver.log.1 | is missing                              |
+      | uxplay-raw.log | fails to copy                           |
+      | receiver.log   | fails to copy                           |
+      | receiver.log.1 | fails to copy                           |
+      | uxplay-raw.log | is a symlink to a sentinel file         |
+      | receiver.log   | is a symlink to a sentinel file         |
+      | receiver.log.1 | is a symlink to a sentinel file         |
+
+  @offline @failure @AIR-089 @AT-89
+  Scenario: A missing raw file is reported with the required words
+    Given a fake unit tree with ParkCast running, both receiver logs, and no "uxplay-raw.log"
+    When the parkcast-diag script runs from the fake stick
+    Then its log has the line "no uxplay-raw.log"
+    And both receiver logs are copied
+    And the script exits non-zero
 
   @offline @failure @AIR-089 @AT-89 @OD-204
   Scenario: An output folder that already exists is left alone
@@ -412,11 +428,20 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     And git tracks no file under "runs/" and no file named "uxplay-raw.log"
 
   @offline @normal @AIR-089 @AIR-075 @AT-89 @AT-75
-  Scenario: Raw-file lines never count as the evaluator's evidence
-    Given a synthetic stick copy of one run judged as a unit run
-    And the same run folder with a "uxplay-raw.log" holding "parkcast start", "parkcast stop" and "Mirroring initialized successfully"
-    When the evaluator judges both
-    Then the two verdicts and summaries are the same
+  Scenario: Writing a result keeps the raw file under runs/ and out of the evidence summary
+    Given a synthetic run folder holding "receiver.log" and a "uxplay-raw.log" with the text "RAW-SENTINEL"
+    When the evaluator writes the result for it into a fake repository root
+    Then the fake root's "runs/" folder holds the copied "uxplay-raw.log"
+    And the only file written under the fake root's "docs/evidence/" is the summary
+    And the summary does not hold "RAW-SENTINEL"
+
+  @offline @boundary @AIR-089 @AIR-075 @AIR-076 @AT-89 @AT-75 @AT-76
+  Scenario: The raw file can't supply evidence the receiver's log lacks
+    Given a synthetic unit run whose receiver log has a session with no "session 1 first frame rendered" record
+    And the evaluator's verdict, summary and cited lines for that folder are saved
+    And a "uxplay-raw.log" is added holding a complete start marker, "Mirroring initialized successfully", "session 1 codec h264 1920x1080", "decoder OMX.TCC.avcdec configured", "session 1 first frame rendered" and a complete end marker, each in receiver-log form
+    When the evaluator judges the folder again
+    Then its verdict, summary and cited lines equal the saved ones
 
   # --- On the unit (evidence from the stick; never run from the PC suite)
 
