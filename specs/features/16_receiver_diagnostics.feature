@@ -437,11 +437,13 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
 
   @offline @boundary @AIR-089 @AIR-075 @AIR-076 @AT-89 @AT-75 @AT-76
   Scenario: The raw file can't supply evidence the receiver's log lacks
-    Given a synthetic unit run whose receiver log has a session with no "session 1 first frame rendered" record
-    And the evaluator's verdict, summary and cited lines for that folder are saved
-    And a "uxplay-raw.log" is added holding a complete start marker, "Mirroring initialized successfully", "session 1 codec h264 1920x1080", "decoder OMX.TCC.avcdec configured", "session 1 first frame rendered" and a complete end marker, each in receiver-log form
+    Given a complete synthetic receiver run with the owner note "picture: yes"
+    And its one session has every GO record except "session 1 first frame rendered"
+    And the evaluator's INCONCLUSIVE verdict, summary and cited lines for that folder are saved
+    And a "uxplay-raw.log" is added holding, in receiver-log form, a complete start marker, "session 1 connection accepted model=iPhone15,2", "Mirroring initialized successfully", "session 1 codec h264 1920x1080", "decoder OMX.TCC.avcdec configured", "session 1 first frame rendered", a session end record and a complete end marker, all within the observation window
     When the evaluator judges the folder again
     Then its verdict, summary and cited lines equal the saved ones
+    And judging the folder with the evaluator as it was before this revision, which reads every "*.log", gives GO, so the check can fail
 
   # --- On the unit (evidence from the stick; never run from the PC suite)
 
