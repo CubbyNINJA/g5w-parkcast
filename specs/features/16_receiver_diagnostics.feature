@@ -65,6 +65,15 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     And the write finished before the callback returned
     And the ring received exactly one log event with level 7 and the text "CSeq: 3"
 
+  @host @failure @AIR-072 @AIR-085 @AIR-088 @AT-72 @AT-85 @AT-88 @OD-198
+  Scenario: Native code writes the raw record without calling Java, whatever the filter does
+    Given the native log path and the ring are compiled with raw diagnostics on
+    And the harness's JNI environment records every call made through it
+    And the Java-side filter is failing, so nothing is written to the receiver's log
+    When UxPlay's log callback is called with level 7 and the text "CSeq: 3"
+    Then the raw file holds the line "<uptime> L7 CSeq: 3"
+    And no JNI call was made while a raw-file call was running
+
   @host @normal @AIR-085 @AT-85 @OD-203
   Scenario: A record is one line, with control bytes escaped
     Given the raw-file module is opened at uptime 1000 ms
@@ -84,6 +93,8 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
       | QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZn | [redacted]                  |
       | <data>MDEyMzQ1Njc4OWFiY2RlZg==</data>        | <data>[redacted]</data>     |
       | PIN = "1234"                                 | PIN = [redacted]            |
+      | <data>AAAA</data> and <data>BBBB</data>      | <data>[redacted]</data> and <data>[redacted]</data> |
+      | 0123456789abcdef0123456789abcdefQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZn | [redacted] |
 
   @host @failure @AIR-083 @AIR-085 @AT-83 @AT-85 @OD-200
   Scenario Outline: The identity key file's path and name are redacted
@@ -101,6 +112,12 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Given the raw-file module is opened
     When a record at level 7 arrives with the text "72 byte ekey:" LF "0a 1b 2c 3d " LF "4e 5f 6a 7b " LF
     Then the raw file's line for it is "<uptime> L7 72 byte ekey:\n[redacted] \n"
+
+  @host @failure @AIR-085 @AT-85 @OD-200 @OD-204
+  Scenario: A <data> value that spans lines is redacted between the tags
+    Given the raw-file module is opened
+    When a record at level 7 arrives with the text "<key>ekey</key>" LF "<data>" LF "QUJD" LF "REVG" LF "</data>"
+    Then the raw file's line for it is "<uptime> L7 <key>ekey</key>\n<data>[redacted]</data>"
 
   @host @boundary @AIR-085 @AT-85 @OD-200
   Scenario Outline: Material just under each threshold is written unchanged
@@ -162,11 +179,13 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
       | aeskey 0a1b2c3d                                          |
       | ecdh 0a1b2c3d                                            |
       | fake.key                                                 |
-      | line one LF line two                                     |
-      | byte 0x01 here                                           |
+      | line one<LF>line two                                     |
+      | byte <0x01> here                                         |
       | 0123456789abcdef0123456789abcdef                         |
+      | 0123456789abcdef0123456789abcde                          |
       | QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZn             |
-    Then the ring holds one log event per text, in order, each with the text exactly as given
+      | QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZ              |
+    Then the ring holds one log event per text, in order, each with exactly the text's bytes, where "<LF>" stands for the byte 0x0A and "<0x01>" for the byte 0x01
     And those events are the same as the native log path pushes when compiled with raw diagnostics off
     And the raw file holds one record line per text
 
@@ -190,38 +209,51 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     When "video_process" is called at 2000 ms
     Then exactly one counter line is written at 2000 ms
 
+  In the counter scenarios below, "fixture events" are pushed straight into the ring, where no count
+  measures them, and are emptied out again before the session-end callback runs, so the session-end
+  event is never itself dropped. "video_process", the codec-configuration push, the log callback and
+  the session-end callback are the native path's own entry points, which `host.c`'s UxPlay callbacks
+  call. Expected counter lines are compared whole, uptime included.
+
   @host @normal @AIR-086 @AT-86 @OD-201
   Scenario Outline: Each count moves exactly as the calls made
     Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
-    And the raw-file module is opened at uptime 1000 ms in generation 1
-    When <actions>
-    And the session ends
-    Then the session-end counter line is "gen=1 au_in=<au_in> csd_sent=<csd> au_ring_drops=<aud> log_ring_drops=<logd> control_drops=<ctl> raw_written=<rw> raw_dropped=<rd>"
+    And the ring is in generation 3
+    And the raw-file module is opened at uptime 1000 ms
+    When at 1100 ms <actions>
+    And the ring is emptied of fixture events
+    And the session-end callback runs at 1200 ms
+    Then the raw file's last line is "1200 counters gen=3 au_in=<au_in> csd_sent=<csd> au_ring_drops=<aud> log_ring_drops=<logd> control_drops=0 raw_written=<rw> raw_dropped=<rd>"
 
     Examples:
-      | actions                                                                      | au_in | csd | aud | logd | ctl | rw | rd |
-      | "video_process" is called 3 times with a non-empty access unit before any codec data | 3 | 0 | 0 | 0 | 0 | 0 | 0 |
-      | the 64 general slots are filled and a codec configuration is pushed          | 0     | 1   | 0   | 0    | 0   | 0  | 0  |
-      | all 72 slots are filled and a codec configuration is pushed                  | 0     | 0   | 0   | 0    | 1   | 0  | 0  |
-      | the 64 general slots are filled, an access unit is pushed and a record arrives | 0   | 0   | 1   | 1    | 0   | 1  | 0  |
-      | two records arrive and one record of 65,537 escaped bytes arrives            | 0     | 0   | 0   | 0    | 0   | 2  | 1  |
+      | actions                                                                                         | au_in | csd | aud | logd | rw | rd |
+      | "video_process" is called 3 times with a non-empty access unit before any codec data            | 3     | 0   | 0   | 0    | 0  | 0  |
+      | the 64 general slots are filled with fixture events and a codec configuration is pushed         | 0     | 1   | 0   | 0    | 0  | 0  |
+      | the 64 general slots are filled with fixture events, "video_process" pushes one access unit and one record arrives | 1 | 0 | 1 | 1 | 1 | 0 |
+      | two records arrive and one record of 65,537 escaped bytes arrives                               | 0     | 0   | 0   | 0    | 2  | 1  |
 
   @host @failure @AIR-086 @AT-86 @OD-201
-  Scenario: A refused codec configuration is a reported breach of OD-190
+  Scenario: A refused codec configuration is counted as a breach of OD-190, not as sent
     Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
-    And all 72 ring slots are full
-    When a codec configuration is pushed
-    And the session ends
-    Then the session-end counter line has "csd_sent=0" and "control_drops=1"
+    And the ring is in generation 3
+    And the raw-file module is opened at uptime 1000 ms
+    And all 72 ring slots are full of fixture events
+    When a codec configuration is pushed at 1100 ms
+    And the ring is emptied of fixture events
+    And the session-end callback runs at 1200 ms
+    Then the raw file's last line is "1200 counters gen=3 au_in=0 csd_sent=0 au_ring_drops=0 log_ring_drops=0 control_drops=1 raw_written=0 raw_dropped=0"
 
   @host @boundary @AIR-086 @AT-86 @OD-201
-  Scenario: Counts carry over a session end and start from zero at the next app start
-    Given the native log path and the ring are compiled with raw diagnostics on
-    And "video_process" was called 2 times with a non-empty access unit, then the session ended
-    When the session ends again with no event between
-    Then that session-end counter line has "au_in=2"
-    When the native side is stopped and a new app start opens the raw-file module
-    Then its first counter line has "au_in=0 csd_sent=0 au_ring_drops=0 log_ring_drops=0 control_drops=0 raw_written=0 raw_dropped=0"
+  Scenario: Every count carries over a session end and starts from zero at the next app start
+    Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
+    And the ring is in generation 2
+    And the raw-file module is opened at uptime 1000 ms
+    And at 1100 ms, in this order: "video_process" with one access unit; one record; one record of 65,537 escaped bytes; the general slots filled up with fixture events; "video_process" with one access unit; one record; one codec configuration; the reserved slots filled up with fixture events; one codec configuration
+    And the ring was emptied of fixture events, and the session-end callback ran at 1200 ms
+    When the session-end callback runs again at 1300 ms with no event between
+    Then the raw file's last line is "1300 counters gen=2 au_in=2 csd_sent=1 au_ring_drops=1 log_ring_drops=1 control_drops=1 raw_written=2 raw_dropped=1"
+    When stop's last phase runs, and a new app start opens the raw-file module at 5000 ms with the ring in generation 1
+    Then the raw file's first line is "5000 counters gen=1 au_in=0 csd_sent=0 au_ring_drops=0 log_ring_drops=0 control_drops=0 raw_written=0 raw_dropped=0"
 
   # --- AIR-087: the cap
 
@@ -233,7 +265,7 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     And one more record arrives
     Then the raw file's last line is the uptime, "raw log full" and the counter fields
     And the raw file is no larger than 16,777,216 bytes
-    And its first record line still ends with "first record"
+    And every line before the final line is byte for byte as it was before the final line was written
     When a record arrives, a counter event comes due, the session ends and stop's last phase runs
     Then the raw file is byte for byte unchanged
 
@@ -250,14 +282,15 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Given the raw-file module is opened
     When a record arrives whose escaped text is 65,536 bytes long
     And a record arrives whose escaped text is 65,537 bytes long
+    And the session-end callback runs
     Then the raw file holds the first record and no part of the second
-    And the next counter line has "raw_written=1" and "raw_dropped=1"
+    And the session-end counter line has "raw_written=1" and "raw_dropped=1"
 
   # --- AIR-088: failures
 
   @host @failure @AIR-088 @AT-88 @OD-201
   Scenario Outline: A raw-file failure stops raw writes until the next app start
-    Given the fake file layer will fail with <failure> at the <when> record
+    Given the fake file layer will fail with <failure> at <when>
     And the raw-file module is opened
     When five records arrive, the session ends and stop's last phase runs
     Then the fake file layer recorded no write, reopen or other open after the failure
@@ -266,12 +299,12 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Then that record is written
 
     Examples:
-      | failure          | when   |
-      | an open failure  | first  |
-      | a failed write   | first  |
-      | a short write    | first  |
-      | a failed write   | third  |
-      | a short write    | third  |
+      | failure          | when                            |
+      | an open failure  | the app start's open            |
+      | a failed write   | the open's counter line         |
+      | a short write    | the open's counter line         |
+      | a failed write   | the third record's line         |
+      | a short write    | the third record's line         |
 
   @host @normal @AIR-088 @AT-88 @OD-203
   Scenario: While raw writes fail, the native log path still pushes every record and reports nothing
@@ -293,9 +326,9 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     And ParkCast's descriptor list points at each of those app-data files
     When the parkcast-diag script runs from the fake stick
     Then a new folder "NEMESIS-diag/parkcast-diag/<timestamp>/" holds copies of "uxplay-raw.log", "receiver.log" and "receiver.log.1" and a listing of the log folder
-    And the journal holds no read of "fake.key" or "other.bin" and no change on the unit
+    And the journal holds no read of "fake.key" or "other.bin", no listing of app data, and no change on the unit
     And no file on the fake stick holds the text "fake.key", the key file's path or bytes, or "other.bin"
-    And the script's log ends with "parkcast diag end"
+    And the script's log ends with "parkcast diag end", written after every copy
     And the script exits 0
 
   @offline @normal @AIR-089 @AT-89 @OD-202
@@ -306,6 +339,18 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     When the parkcast-diag script runs from the fake stick
     Then no file on the fake stick holds "UNFILTERED-SENTINEL"
     And the fake "logcat" was never asked to write to a file
+
+  @offline @normal @AIR-089 @AT-89 @OD-202
+  Scenario: Every logcat call in the script pipes straight into grep
+    Given the parkcast-diag script in the repository
+    When the logcat check reads it
+    Then the check passes: every "logcat" call has no "-f" option and its output goes through a pipe straight into "grep", with no redirect before the pipe
+
+  @offline @failure @AIR-089 @AT-89 @OD-202
+  Scenario: The logcat check catches a script that writes unfiltered logcat, overwrites it and deletes it
+    Given a fixture script that redirects "logcat -d" to a file on the stick, overwrites that file with filtered lines, and deletes it
+    When the logcat check reads it
+    Then the check fails and names the redirected "logcat" call
 
   @offline @normal @AIR-089 @AT-89 @OD-202
   Scenario Outline: Starting ParkCast is the only change, and only when it isn't running
@@ -332,10 +377,13 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
       | source         | problem                                 | report                         |
       | uxplay-raw.log | is missing                              | no uxplay-raw.log              |
       | receiver.log   | is missing                              | no receiver.log                |
+      | receiver.log.1 | is missing                              | no receiver.log.1              |
       | uxplay-raw.log | fails to copy                           | copy failed uxplay-raw.log     |
+      | receiver.log   | fails to copy                           | copy failed receiver.log       |
       | receiver.log.1 | fails to copy                           | copy failed receiver.log.1     |
       | uxplay-raw.log | is a symlink to a sentinel file         | symlink uxplay-raw.log         |
       | receiver.log   | is a symlink to a sentinel file         | symlink receiver.log           |
+      | receiver.log.1 | is a symlink to a sentinel file         | symlink receiver.log.1         |
 
   @offline @failure @AIR-089 @AT-89 @OD-204
   Scenario: An output folder that already exists is left alone
@@ -343,6 +391,7 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     And the stick already holds the folder the script would make, with a file in it
     When the parkcast-diag script runs from the fake stick
     Then that folder's contents are unchanged
+    And its log reports that the folder already exists
     And no source was copied
     And the script exits non-zero
 
@@ -351,15 +400,16 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Given a fake unit tree whose build is not "eng.vmadmin.20260206.060005"
     And the stick's root "NEMESIS.data" is the tool's own
     When the parkcast-diag script runs from the fake stick
-    Then the root "NEMESIS.data" is gone
+    Then the root "NEMESIS.data" is gone, and the journal shows it removed before the build was queried
     And its log says the guard failed
     And the journal holds no source read, no copy and no "am" call
     And the script exits non-zero
 
   @host @normal @AIR-089 @AT-89
-  Scenario: The PC keeps the tool's output out of git
+  Scenario: The PC keeps the tool's output under runs/ and out of git
     Given the repository
     Then a file under "runs/" is ignored by git
+    And git tracks no file under "runs/" and no file named "uxplay-raw.log"
 
   @offline @normal @AIR-089 @AIR-075 @AT-89 @AT-75
   Scenario: Raw-file lines never count as the evaluator's evidence
