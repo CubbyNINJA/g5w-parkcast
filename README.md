@@ -15,13 +15,14 @@ receiver [UxPlay](https://github.com/FDH2/UxPlay) and ships as a
 |---|---|---|
 | S1 | PC feasibility test: does an iPhone mirror H.264 to UxPlay set up like the head unit? | **Done, GO** (iPhone16,2, iOS 27.3, UxPlay 1.74; `docs/evidence/`) |
 | S2 | The parking gate: video only in Park, read from the stock Park getter; sleep, logging, config | **Done offline**: the gate in plain Java 7 (`receiver/gate/`), 433 Cucumber runs pass, mutation-checked. The `@unit` evidence checks (feature 12) come with the on-unit receiver (OD-137) |
-| S3 | The receiver on the head unit: UxPlay's AirPlay library cross-built for Android 4.4 ARMv7, video through the unit's H.264 decoder, with the S2 gate | **Now**: owner decisions OD-138 to OD-145; first milestone video only, GO/NO-GO (OD-139) |
+| S3 | The receiver on the head unit: UxPlay's AirPlay library cross-built for Android 4.4 ARMv7, video through the unit's H.264 decoder, with the S2 gate | **Now**: built and run on the unit once (2026-11-23): the iPhone finds ParkCast and connects, but no video reaches the app yet (`docs/evidence/S3_FIRST_RUN_FINDINGS.md`); next, a diagnostic raw log (OD-198). First milestone video only, GO/NO-GO (OD-139) |
 | S4 | The NEMESIS package: launched from NEMESIS Manager, config and logs | Not started |
 | S5 | Coexisting with wireless CarPlay (ports, mDNS, who owns the screen) | Decisions OD-76, OD-77 and OD-97 taken; not specified yet |
 
-There is **no runnable receiver app yet**. The repository holds the S1 PC test tool (`tools/airplay_s1/`),
-read-only head-unit probes (`tools/unit-probes/`), the specifications, and S2's parking gate: plain Java in
-`receiver/gate/`, with the first piece of Android glue (`receiver/app/`, not built yet).
+The receiver is an **S3 test build**: it installs and connects on the owner's unit but doesn't show video yet.
+The repository holds the S1 PC test tool (`tools/airplay_s1/`), read-only head-unit probes
+(`tools/unit-probes/`), the specifications, S2's parking gate (plain Java in `receiver/gate/`), and the S3
+receiver (`receiver/core/`, `receiver/app/` and `receiver/native/`).
 
 ## Roadmap
 

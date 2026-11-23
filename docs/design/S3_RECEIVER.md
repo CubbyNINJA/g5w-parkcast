@@ -360,6 +360,12 @@ publish.
 
 ## Open on-unit risks
 
+Answered by the first on-unit run (2026-11-23, `docs/evidence/S3_FIRST_RUN_FINDINGS.md`): the **loader** accepts the
+r25c `.so`; an app can start **mdnsd**, connect, and register `_airplay._tcp` with its TXT records (the iPhone
+found ParkCast); the **key file** is created owner-only and reused. Newly open: the session never reached the
+mirror data stream (nothing connected to TCP 35000), and `addListener` on the regulation service throws
+`InvocationTargetException`. OD-198's diagnostic raw log is how the first is pursued.
+
 Added by the step 4 build (2026-11-20), on top of the list below:
 
 - **Launch**: the activity is not exported; the install script starts it as root with `am start -n`.
