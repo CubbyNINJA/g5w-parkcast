@@ -331,6 +331,7 @@ def generation(rworld, gen):
 @given("all 72 ring slots are full of fixture events")
 def all_full(rworld):
     assert rworld.nat.harness_fixture_fill(72) == 72
+    rworld.nat_ring_full = True
 
 
 @given('at 1100 ms, in this order: "video_process" with one access unit; one record; one record of 65,537 '
@@ -485,6 +486,23 @@ def video_at(rworld, ms):
     _video(rworld, int(ms))
 
 
+@when(parsers.re(r'"video_process" is called with an access unit at (?P<ms>\d+) ms'))
+def video_au_at(rworld, ms):
+    _video(rworld, int(ms))
+
+
+@when(parsers.re(r"the session-start callback runs at (?P<ms>\d+) ms"))
+def session_start_at(rworld, ms):
+    _clock(rworld, int(ms))
+    rworld.nat.lp_session_start(rworld.nat.harness_generation())
+
+
+@when(parsers.re(r'a record at level (?P<level>\d+) arrives at (?P<ms>\d+) ms with the text "(?P<a>[^"]*)" '
+                 r'followed by the byte 0x(?P<hex>[0-9a-f]{2}) and "(?P<b>[^"]*)"'))
+def record_with_byte(rworld, level, ms, a, hex, b):
+    _record(rworld, a.encode() + bytes([int(hex, 16)]) + b.encode(), int(level), int(ms))
+
+
 @when(parsers.re(r"at (?P<ms>\d+) ms (?P<actions>.+)"))
 def at_ms_actions(rworld, ms, actions):
     w = rworld
@@ -493,6 +511,11 @@ def at_ms_actions(rworld, ms, actions):
         w.nat.lp_set_h264(1920, 1080)
         for _ in range(3):
             _video(w)
+    elif actions == '"video_process" is called twice with an empty access unit and once with a non-empty one':
+        w.nat.lp_set_h264(1920, 1080)
+        for _ in range(2):
+            w.nat.lp_video_process(AU, 0, 0, 0)
+        _video(w)
     elif actions == "the 64 general slots are filled with fixture events and a codec configuration is pushed":
         assert w.nat.harness_fixture_fill(64) == 64
         assert _codec(w) == 1
@@ -532,7 +555,10 @@ def session_end_again(rworld):
 @when(parsers.re(r"a codec configuration is pushed at (?P<ms>\d+) ms"))
 def codec_at(rworld, ms):
     _clock(rworld, int(ms))
-    assert _codec(rworld) == 0, "the ring should refuse it"
+    if getattr(rworld, "nat_ring_full", False):
+        assert _codec(rworld) == 0, "the ring should refuse it"
+    else:
+        assert _codec(rworld) == 1, "the ring should accept it"
 
 
 @when("stop's last phase runs, and a new app start opens the raw-file module at 5000 ms with the ring in "
@@ -639,7 +665,16 @@ def ring_exactly_one(rworld, level, text):
 
 
 @then(parsers.re(r'the raw file holds the line "(?P<line>.*)"'))
-def holds_line(rworld, line):
+def holds_line(rworld, line, request):
+    # pytest-bdd 8 doubles every backslash in an Examples cell (gherkin_parser._to_raw_string), so a cell
+    # such as \x1b reaches the step as two backslashes; undo that for the substituted cell values only.
+    try:
+        example = request.getfixturevalue("_pytest_bdd_example") or {}
+    except pytest.FixtureLookupError:
+        example = {}
+    for value in example.values():
+        if isinstance(value, str) and "\\" in value:
+            line = line.replace(value, value.replace("\\\\", "\\"))
     assert _expect(rworld, line) in _lines(rworld), f"no line {line!r}; last: {_lines(rworld)[-1:]!r}"
 
 
@@ -891,3 +926,50 @@ def only_own_mutex(rworld):
     assert fops, "no raw-file operation was recorded"
     bad = [f for f in fops if f["held_n"] != 0 and not f["held_only_raw"]]
     assert not bad, f"{len(bad)} raw-file operations held another mutex"
+
+
+# ---- The counter-line boundary at 16,776,704 bytes (added after the mutation check: `fits` with `<`) ----
+
+COUNTER_LINE = re.compile(rb"^\d+ counters gen=\d+ au_in=\d+ csd_sent=\d+ au_ring_drops=\d+ log_ring_drops=\d+ "
+                          rb"control_drops=\d+ raw_written=\d+ raw_dropped=\d+$")
+
+
+def _bump(line: bytes, field: bytes, by: int) -> bytes:
+    return re.sub(rb"( " + field + rb"=)(\d+)", lambda m: m.group(1) + b"%d" % (int(m.group(2)) + by), line)
+
+
+@given("records are written until the next session-end counter line would end the file at exactly 16,776,704 "
+       "bytes")
+def fill_for_counter_boundary(rworld):
+    _filler(rworld, THRESHOLD - 400)
+    # A session end now writes a counter line holding the current counts (a session end changes none, AIR-086(a)).
+    _session_end(rworld)
+    c1 = _lines(rworld)[-1]
+    assert COUNTER_LINE.match(c1), c1[:200]
+    # One more record changes raw_written by one, and log_ring_drops by one if the ring is already refusing
+    # log records; the next session end's counter line is then c2.
+    c2 = _bump(c1, b"raw_written", 1)
+    if int(re.search(rb"log_ring_drops=(\d+)", c1).group(1)) > 0:
+        c2 = _bump(c2, b"log_ring_drops", 1)
+    target = THRESHOLD - (len(c2) + 1)
+    prefix = len(f"{rworld.nat_now} L7 ") + 1
+    text_len = target - rworld.nat.harness_fs_len() - prefix
+    assert text_len > 0, text_len
+    rworld.nat.harness_log(7, b"." * text_len)
+    assert rworld.nat.harness_fs_len() == target
+    rworld.nat_expected_counter = c2
+
+
+@then("the raw file is exactly 16,776,704 bytes long")
+def exactly_threshold(rworld):
+    assert rworld.nat.harness_fs_len() == THRESHOLD, rworld.nat.harness_fs_len()
+
+
+@then('its last line is a counter line, and no line is "raw log full"')
+def last_is_counter(rworld):
+    lines = _lines(rworld)
+    assert COUNTER_LINE.match(lines[-1]), lines[-1][:200]
+    expected = getattr(rworld, "nat_expected_counter", None)
+    if expected is not None:
+        assert lines[-1] == expected, (lines[-1], expected)
+    assert not any(b"raw log full" in x for x in lines)

@@ -95,6 +95,19 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Then the raw file holds the line "1234 L7 SETUP 1\r\n\\\x01"
     And that record adds exactly one line, ending in one LF
 
+  @host @boundary @AIR-085 @AT-85 @OD-203
+  Scenario Outline: Bytes outside 0x20-0x7E are escaped as two lowercase hex digits
+    Given the raw-file module is opened at uptime 1000 ms
+    When a record at level 7 arrives at 1234 ms with the text "a" followed by the byte <byte> and "b"
+    Then the raw file holds the line "1234 L7 a<escape>b"
+
+    Examples:
+      | byte | escape |
+      | 0x1b | \x1b   |
+      | 0x7f | \x7f   |
+      | 0xfe | \xfe   |
+      | 0x7e | ~      |
+
   @host @failure @AIR-085 @AT-85 @OD-200
   Scenario Outline: Key material in a record is redacted in place
     Given the raw-file module is opened
@@ -138,6 +151,23 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Given the raw-file module is opened
     When a record at level 7 arrives with the text "<key>ekey</key>" LF "<data>" LF "QUJD" LF "REVG" LF "</data>"
     Then the raw file's line for it is "<uptime> L7 <key>ekey</key>\n<data>[redacted]</data>"
+
+  @host @failure @AIR-085 @AT-85 @OD-207
+  Scenario Outline: Unterminated key material is redacted through the end of the record
+    Given the raw-file module is opened
+    When a record at level 7 arrives with the text "<input>"
+    Then the raw file's line for it is "<uptime> L7 <output>"
+
+    Examples:
+      | input                                         | output                  |
+      | before PIN = "1234 and no closing quote after | before PIN = [redacted] |
+      | before <data>QUJD with no closing tag after   | before <data>[redacted] |
+
+  @host @failure @AIR-085 @AT-85 @OD-200 @OD-204
+  Scenario: A byte dump at the very start of a record is redacted
+    Given the raw-file module is opened
+    When a record at level 7 arrives with the text "0a 1b 2c 3d 4e 5f 6a 7b after"
+    Then the raw file's line for it is "<uptime> L7 [redacted] after"
 
   @host @boundary @AIR-085 @AT-85 @OD-200
   Scenario Outline: Material just under each threshold is written unchanged
@@ -222,12 +252,19 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Then counter lines at 2700 ms and 2800 ms are written
 
   @host @boundary @AIR-086 @AT-86 @OD-204
-  Scenario: An event without a record writes the counter line at exactly 1,000 ms
-    Given the raw-file module is opened at uptime 1000 ms
-    When "video_process" is called at 1999 ms
+  Scenario Outline: Each kind of event without a record writes the counter line at exactly 1,000 ms
+    Given the native log path and the ring are compiled with raw diagnostics on, and delivery is stopped
+    And the raw-file module is opened at uptime 1000 ms
+    When <event> at 1999 ms
     Then no counter line is written at 1999 ms
-    When "video_process" is called at 2000 ms
+    When <event> at 2000 ms
     Then exactly one counter line is written at 2000 ms
+
+    Examples:
+      | event                                              |
+      | "video_process" is called with an access unit      |
+      | a codec configuration is pushed                    |
+      | the session-start callback runs                    |
 
   # In the counter scenarios below, "fixture events" are pushed straight into the ring, where no count
   # measures them, and are emptied out again before the session-end callback runs, so the session-end
@@ -248,6 +285,7 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Examples:
       | actions                                                                                         | au_in | csd | aud | logd | rw | rd |
       | "video_process" is called 3 times with a non-empty access unit before any codec data            | 3     | 0   | 0   | 0    | 0  | 0  |
+      | "video_process" is called twice with an empty access unit and once with a non-empty one         | 1     | 0   | 0   | 0    | 0  | 0  |
       | the 64 general slots are filled with fixture events and a codec configuration is pushed         | 0     | 1   | 0   | 0    | 0  | 0  |
       | the 64 general slots are filled with fixture events, "video_process" pushes one access unit and one record arrives | 1 | 0 | 1 | 1 | 1 | 0 |
       | two records arrive and one record of 65,537 escaped bytes arrives                               | 0     | 0   | 0   | 0    | 2  | 1  |
@@ -296,6 +334,14 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     When a counter line comes due
     Then the raw file's last line is the uptime, "raw log full" and the counter fields
     And the raw file is no larger than 16,777,216 bytes
+
+  @host @boundary @AIR-087 @AT-87 @OD-204
+  Scenario: A counter line that ends exactly at 16,776,704 bytes is written as an ordinary counter line
+    Given the raw-file module is opened
+    And records are written until the next session-end counter line would end the file at exactly 16,776,704 bytes
+    When the session-end callback runs
+    Then the raw file is exactly 16,776,704 bytes long
+    And its last line is a counter line, and no line is "raw log full"
 
   @host @boundary @AIR-087 @AT-87 @OD-204
   Scenario: A record whose escaped text is 65,536 bytes is written and one byte more is dropped

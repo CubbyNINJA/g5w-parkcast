@@ -1,4 +1,4 @@
-# First on-unit S3 run: connected, but no video reached the app (2026-11-23)
+# S3 on-unit run 1: connected, but no video reached the app (2026-11-23)
 
 The owner ran the S3 test build (app 0.3.0, commit `444e768`, UxPlay `05b0275`) on their unit (build 260206,
 `eng.vmadmin.20260206.060005`), parked, with wireless CarPlay disconnected and the iPhone (iPhone16,2) on the
