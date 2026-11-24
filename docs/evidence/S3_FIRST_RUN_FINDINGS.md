@@ -4,7 +4,7 @@ The owner ran the S3 test build (app 0.3.0, commit `444e768`, UxPlay `05b0275`) 
 `eng.vmadmin.20260206.060005`), parked, with wireless CarPlay disconnected and the iPhone (iPhone16,2) on the
 unit's hotspot. The install went through `tools/parkcast-install` twice (16:56 and 16:57, unit clock), because
 the root `NEMESIS.data` was left on the stick. `copy-logs` was not completed, so there is no owner note or
-checklist, and no run verdict under AIR-075 and AIR-076. A read-only stick tool, `tools/unit-probes/parkcast-diag`,
+checklist, and no run verdict under AIR-075 and AIR-076. A read-only stick tool, `tools/unit-probes/parkcast-diag` (since replaced by `tools/airplay_s3/stick/parkcast-diag.sh`, AIR-089),
 then ran at 17:07 (unit clock) while the owner cast again. Its output, ParkCast's `receiver.log` from all three
 app starts and the NEMESIS logs are kept in `runs/` and on the stick, not here. They can name the iPhone and
 hold its address. For OD-139, AMB-96, AMB-98 and OD-198.

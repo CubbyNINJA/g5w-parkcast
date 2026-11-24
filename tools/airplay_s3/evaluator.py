@@ -1,10 +1,12 @@
 """The S3 evaluator: reads a stick copy of the receiver's logs on the PC (AIR-071, AIR-075, AIR-076, AIR-079).
 
 A run folder is `NEMESIS-diag/airplay-receiver/<timestamp>/` as the log-copy script leaves it: the receiver's
-`*.log` files, the owner's `owner-note.txt` and `run-checklist.txt`. Raw logs only ever go under `runs/`; the
-committed summary carries the verdict, the device model, the iOS version, the build ids and the checklist.
+`receiver.log` and its rotated `receiver.log.1`, the owner's `owner-note.txt` and `run-checklist.txt`. A
+`parkcast-diag` folder adds `uxplay-raw.log`, which is never read: raw-file lines are not markers or evidence
+(AIR-089(g)). Logs only ever go under `runs/`; the committed summary carries the verdict, the device model, the
+iOS version, the build ids and the checklist.
 
-Cites are 1-based line numbers over the folder's `*.log` files read in name order, plus `owner-note.txt`
+Cites are 1-based line numbers over `receiver.log.1` then `receiver.log` (oldest first), plus `owner-note.txt`
 when the note decided a verdict."""
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ DEADLINE_MS = 600_000
 CHECKLIST_KEYS = ("parkcast listed", "letterboxed", "sound on unit", "stayed behind other app",
                   "nothing on cluster or hud", "carplay after exit")
 NOTE = "owner-note.txt"
+LOGS = ("receiver.log.1", "receiver.log")  # oldest first: rotation renames receiver.log to receiver.log.1
+RAW = "uxplay-raw.log"
 CHECKLIST = "run-checklist.txt"
 OFFLINE_SENTENCE = "This is a synthetic fixture result and not evidence about any iPhone."
 RUN_LEVEL = ("parkcast", "carplay listener", "port busy", "advertise ", "hotspot address missing", "mdnsd up")
@@ -36,8 +40,9 @@ NOTE_LINE = re.compile(r"\s*picture\s*:\s*(yes|no)\s*", re.IGNORECASE)
 # --- Reading the log (AIR-071, AIR-075(b), AIR-076(h)) ------------------------------------------------------
 
 def _records(run_dir: Path):
-    """[(line, ms or None, text)] over every *.log in name order, and whether the data ends with LF."""
-    files = sorted(p for p in run_dir.glob("*.log") if p.is_file())
+    """[(line, ms or None, text)] over receiver.log.1 then receiver.log, and whether the data ends with LF.
+    No other file is read, so the raw file can't supply a marker or evidence (AIR-089(g))."""
+    files = [run_dir / n for n in LOGS if (run_dir / n).is_file()]
     if not files:
         raise OSError("no log file")
     data = b"".join(p.read_bytes() for p in files)
@@ -335,12 +340,13 @@ def read_run_folder(run_dir, tier: str = "unit", ios: str | None = None):
 
 
 def write_result(run_dir, root, tier: str = "unit", ios: str | None = None) -> Path:
-    """Copies the raw files under root/runs/ and writes only the redacted summary to root/docs/evidence/."""
+    """Copies the logs (the raw file too) under root/runs/ and writes only the redacted summary to
+    root/docs/evidence/ (AIR-089(g))."""
     run_dir, root = Path(run_dir), Path(root)
     result = read_run_folder(run_dir, tier=tier, ios=ios)
     raw = root / "runs" / "NEMESIS-diag" / "airplay-receiver" / run_dir.name
     raw.mkdir(parents=True, exist_ok=True)
-    for src in sorted(run_dir.glob("*.log")) + [run_dir / NOTE, run_dir / CHECKLIST]:
+    for src in [run_dir / n for n in LOGS + (RAW, NOTE, CHECKLIST)]:
         if src.is_file():
             shutil.copyfile(src, raw / src.name)
     dest = root / "docs" / "evidence"

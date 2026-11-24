@@ -11,6 +11,7 @@
  * filter runs before anything is written.
  */
 #include "parkcast.h"
+#include "logpath.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -53,10 +54,6 @@ static pthread_t g_watch;
 static bool g_watching;
 static int g_wake[2] = { -1, -1 };
 static atomic_int g_reply[2], g_seen[2], g_registered, g_lost_sent;
-
-/* Video state, touched only by UxPlay's mirror thread (and reset under g_api while no session runs). */
-static bool g_need_csd;
-static int g_width, g_height;
 
 /* ------------------------------------------------------------------------------------------------------ */
 
@@ -112,58 +109,11 @@ static void cb_audio_process(void *cls, raop_ntp_t *ntp, audio_decode_struct *da
     /* Audio is discarded (AIR-055(b)): nothing is decoded or played. */
 }
 
-/* Appends the NAL at [nal, nal + len) to out with a four-byte start code. */
-static int csd_append(unsigned char *out, int at, int cap, const unsigned char *nal, int len)
-{
-    if (at + 4 + len > cap) return at;
-    out[at] = 0; out[at + 1] = 0; out[at + 2] = 0; out[at + 3] = 1;
-    memcpy(out + at + 4, nal, (size_t)len);
-    return at + 4 + len;
-}
-
-/* Finds the SPS (type 7) and PPS (type 8) NALs in an Annex-B access unit and pushes them as kind 3. */
-static bool push_h264_csd(int gen, const unsigned char *p, int n)
-{
-    const unsigned char *sps = NULL, *pps = NULL;
-    int sps_len = 0, pps_len = 0;
-    int i = 0;
-    while (i + 3 <= n) {
-        int sc = 0;
-        if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1) sc = 3;
-        else if (i + 4 <= n && p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 0 && p[i + 3] == 1) sc = 4;
-        if (!sc) { i++; continue; }
-        int start = i + sc, end = start;
-        while (end + 3 <= n && !(p[end] == 0 && p[end + 1] == 0 && (p[end + 2] == 1
-               || (end + 4 <= n && p[end + 2] == 0 && p[end + 3] == 1))))
-            end++;
-        if (end + 3 > n) end = n;
-        if (start < end) {
-            int type = p[start] & 0x1f;
-            if (type == 7 && !sps) { sps = p + start; sps_len = end - start; }
-            else if (type == 8 && !pps) { pps = p + start; pps_len = end - start; }
-        }
-        if (sps && pps) break;
-        i = end;
-    }
-    if (!sps || !pps) return false;
-    unsigned char csd[1024];
-    int len = csd_append(csd, 0, (int)sizeof csd, sps, sps_len);
-    len = csd_append(csd, len, (int)sizeof csd, pps, pps_len);
-    if (len != 8 + sps_len + pps_len) return false;
-    ring_push(gen, PC_EV_CODEC_CONFIG, g_width, g_height, 0, "h264", csd, len);
-    return true;
-}
-
 static void cb_video_process(void *cls, raop_ntp_t *ntp, video_decode_struct *data)
 {
-    int gen = ring_generation();
-    if (!data || !data->data || data->data_len < 5 || data->data[0] != 0 || data->is_h265) return;
-    if (g_need_csd) {
-        if (!push_h264_csd(gen, data->data, data->data_len)) return; /* no decoder config yet */
-        g_need_csd = false;
-    }
-    ring_push(gen, PC_EV_AU, 0, 0, (int64_t)(data->ntp_time_remote / 1000000ULL), NULL, data->data,
-              data->data_len);
+    /* logpath.c: counts the call for the raw log, finds the H.264 decoder config and pushes the access unit. */
+    if (!data) { lp_video_process(NULL, 0, 0, 0); return; }
+    lp_video_process(data->data, data->data_len, data->is_h265, data->ntp_time_remote);
 }
 
 static void cb_video_pause(void *cls) {}
@@ -178,20 +128,18 @@ static int cb_video_set_codec_and_size(void *cls, video_codec_t codec, unsigned 
 {
     int gen = ring_generation();
     if (codec == VIDEO_CODEC_H265) {
-        ring_push(gen, PC_EV_CODEC_CONFIG, width_source, height_source, 0, "h265", NULL, 0);
+        lp_push_codec_config(width_source, height_source, "h265", NULL, 0);
         return -1; /* refused: UxPlay drops the connection */
     }
     if (codec != VIDEO_CODEC_H264) return -1;
-    g_width = width_source;
-    g_height = height_source;
-    g_need_csd = true;
+    lp_set_h264(width_source, height_source);
     return 0;
 }
 
 static void cb_conn_init(void *cls)
 {
     int gen = ring_generation();
-    if (atomic_fetch_add(&g_conns, 1) == 0) ring_push(gen, PC_EV_SESSION_START, 0, 0, 0, NULL, NULL, 0);
+    if (atomic_fetch_add(&g_conns, 1) == 0) lp_session_start(gen);
 }
 
 static void cb_conn_destroy(void *cls)
@@ -199,7 +147,7 @@ static void cb_conn_destroy(void *cls)
     int gen = ring_generation();
     int before = atomic_load(&g_conns);
     while (before > 0 && !atomic_compare_exchange_weak(&g_conns, &before, before - 1)) {}
-    if (before == 1) ring_push(gen, PC_EV_SESSION_END, 0, 0, 0, NULL, NULL, 0);
+    if (before == 1) lp_session_end(gen);
 }
 
 static double cb_audio_set_client_volume(void *cls) { return 0.0; }
@@ -242,7 +190,7 @@ static raop_callbacks_t g_callbacks = {
 
 static void cb_log(void *cls, int level, const char *msg)
 {
-    if (msg) ring_push(ring_generation(), PC_EV_LOG, level, 0, 0, msg, NULL, 0);
+    lp_log(level, msg); /* the raw log first (AIR-085(a)), then the ring */
 }
 
 static void cb_refused(void *cls, int kind)
@@ -389,6 +337,7 @@ static void stage_keycheck(const char *keyfile, char *result, int result_len)
     const char *key = (keyfile && *keyfile) ? keyfile : NULL;
     bool existed = key && access(key, F_OK) == 0;
 
+    lp_open(key); /* AIR-085(a): after the stdio redirect, before raop_init; opens nothing with no key */
     g_raop = raop_init(&g_callbacks);
     if (!g_raop) { result_set(result, result_len, false, "init"); return; }
     raop_set_log_callback(g_raop, cb_log, NULL);
@@ -521,7 +470,7 @@ static void stage_accept(char *result, int result_len)
 {
     if (!g_raop || !g_dnssd || !g_bound) { result_set(result, result_len, false, "state"); return; }
     if (atomic_load(&g_accepting)) { result_set(result, result_len, true, "accepting"); return; }
-    g_need_csd = false;
+    lp_reset_video();
     unsigned short port = RTSP_PORT;
     int rc = raop_start_httpd(g_raop, &port);
     if (rc < 0) { result_set(result, result_len, false, "httpd %d", rc); return; }
@@ -577,8 +526,9 @@ void host_stop(int phase)
         netutils_release_ports();
         if (g_raop) { raop_destroy(g_raop); g_raop = NULL; }
         g_bound = false;
-        g_need_csd = false;
+        lp_reset_video();
         atomic_store(&g_conns, 0);
+        lp_stop_last(); /* the raw log's last counter line, then its close (AIR-086(b)) */
         ring_close();
         break;
     default:

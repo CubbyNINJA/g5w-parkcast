@@ -12,7 +12,8 @@ from pytest_bdd.parser import FeatureParser
 from feature_sets import FEATURES, python_features
 STEP_MODULES = ["steps.build_steps", "steps.run_steps", "steps.prompt_steps", "steps.log_steps", "steps.evidence_steps",
                 "steps.cli_steps", "steps.live_steps", "steps.receiver_common_steps", "steps.receiver_build_steps",
-                "steps.receiver_stick_steps", "steps.receiver_zip_steps", "steps.receiver_eval_steps"]
+                "steps.receiver_stick_steps", "steps.receiver_zip_steps", "steps.receiver_eval_steps",
+                "steps.receiver_diag_native_steps", "steps.receiver_diag_stick_steps", "steps.receiver_diag_build_steps"]
 
 
 def _definitions():

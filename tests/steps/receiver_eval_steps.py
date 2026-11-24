@@ -131,7 +131,7 @@ def _run_dir(rworld) -> Path:
     if getattr(rworld, "eval_dir", None) is None:
         run_dir = rworld.tmp / "eval" / RUN_PARENT / TIMESTAMP
         run_dir.mkdir(parents=True)
-        (run_dir / "receiver-1.log").write_bytes(_render(rworld))
+        (run_dir / "receiver.log").write_bytes(_render(rworld))
         _place(run_dir, "owner-note.txt", rworld.eval_note, rworld.eval_note_where)
         _place(run_dir, "run-checklist.txt", rworld.eval_checklist, rworld.eval_checklist_where)
         rworld.eval_dir = run_dir
@@ -139,7 +139,7 @@ def _run_dir(rworld) -> Path:
 
 
 def _log_lines(rworld) -> list[str]:
-    return (_run_dir(rworld) / "receiver-1.log").read_text(encoding="utf-8").split("\n")[:-1]
+    return (_run_dir(rworld) / "receiver.log").read_text(encoding="utf-8").split("\n")[:-1]
 
 
 class _LazyJudgement:
@@ -151,7 +151,7 @@ class _LazyJudgement:
     def real(self):
         if self.__dict__["_j"] is None:
             run_dir = _run_dir(self.__dict__["_rworld"])
-            self.__dict__["_world"].log = run_dir / "receiver-1.log"
+            self.__dict__["_world"].log = run_dir / "receiver.log"
             self.__dict__["_j"] = _ev().judge_run_folder(run_dir)
         return self.__dict__["_j"]
 

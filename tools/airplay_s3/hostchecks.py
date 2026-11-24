@@ -4,8 +4,10 @@ Readers used by the @host scenarios of specs/features/14_receiver_tools.feature 
 check): git tracking and ignore state, the APK's entries, native libraries (NEEDED entries and ARM CPU
 architecture read straight from the ELF, the way `readelf -d` / `readelf -A` show them), printable strings,
 the CMake source list, `bind()` calls in the patched UxPlay source, the NDK API 19 platform libraries, the
-SDK install log, APK signatures, JUnit totals, JNI class references, the host callback table and the APK's
-permissions (`aapt dump permissions`). Nothing here downloads or builds anything.
+SDK install log, APK signatures, JUnit totals, JNI class references, the host callback table, the APK's
+permissions (`aapt dump permissions`), and the static check that raw diagnostics have no runtime switch
+(AIR-084(c): exported entry points against the design's JNI contract, and the app's run-time reads). Nothing
+here downloads or builds anything.
 
 Usage: python -m airplay_s3.hostchecks apk APK     (entries, signature, permissions, NEEDED, arch)
        python -m airplay_s3.hostchecks binds DIR   (bind calls and any wildcard address they pass)
@@ -474,6 +476,148 @@ def host_table(path) -> dict:
     for m in re.finditer(r"\w+\s*(?:\.|->)\s*(\w+)\s*=\s*([^;]+);", text):
         table.setdefault(m.group(1), m.group(2).strip())
     return {k: (None if v.strip("() ") in ("NULL", "0", "nullptr") else v) for k, v in table.items()}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# No runtime switch for raw diagnostics (AIR-084(c); OD-199, OD-204)
+# ---------------------------------------------------------------------------------------------------------
+
+_NATIVE_SUFFIXES = (".c", ".cc", ".cpp", ".h")
+_TEXT_SUFFIXES = (".java", ".kt", ".xml", ".properties", ".json", ".txt", ".conf", ".cfg")
+_NATIVE_DECL = re.compile(r"\bstatic\s+native\s+[\w.\[\]<>]+\s+(\w+)\s*\(")
+_ANY_NATIVE = re.compile(r"\bnative\b[^;{}()=]*?\b(\w+)\s*\(")
+_EXPORT = re.compile(r'visibility\s*\(\s*"default"\s*\)|\bJNIEXPORT\b')
+_FUNC_NAME = re.compile(r"(\w+)\s*\(")
+_VISIBILITY_PUSH = re.compile(r"#\s*pragma\s+GCC\s+visibility\s+push\s*\(\s*default\s*\)")
+RAW_DIAG_TERMS = re.compile(r"raw[\s_-]?diag|uxplay-raw|parkcast_raw", re.I)
+RUNTIME_SETTING_APIS = re.compile(
+    r"\bgetSharedPreferences\b|\bPreferenceManager\b|\bSystem\s*\.\s*getProperty\b|\bSystem\s*\.\s*getenv\b"
+    r"|\bSettings\s*\.\s*(?:System|Global|Secure)\b|\bBuild\s*\.\s*TYPE\b")
+PROPERTY_LITERAL = re.compile(r'"((?:ro|persist|sys|debug|vendor|service|ctl|log)\.[\w.\-]+)"')
+ALLOWED_PROPERTIES = {"ro.build.product"}
+NATIVE_RUNTIME_READS = re.compile(r"\bgetenv\s*\(|\bsecure_getenv\s*\(|\bproperty_get\b|__system_property_\w+")
+
+
+def jni_contract_methods(design_text) -> set:
+    """The native method names in the design's JNI contract: the first ```java block after "## JNI contract"."""
+    head = design_text.find("## JNI contract")
+    if head < 0:
+        return set()
+    start = design_text.find("```java", head)
+    end = design_text.find("```", start + 7) if start >= 0 else -1
+    if start < 0 or end < 0:
+        return set()
+    return set(_NATIVE_DECL.findall(_blank_comments(design_text[start + 7:end])))
+
+
+def java_native_methods(java_text) -> set:
+    """The names of every method declared `native` in a Java source, whatever its other modifiers."""
+    return set(_ANY_NATIVE.findall(_blank_comments(java_text)))
+
+
+def _native_files(src_dir):
+    return sorted(p for p in Path(src_dir).rglob("*") if p.suffix in _NATIVE_SUFFIXES and p.is_file())
+
+
+def native_exports(src_dir) -> list:
+    """Functions the native sources mark for export (`visibility("default")` or `JNIEXPORT`), each named by the
+    function it declares. A `#pragma GCC visibility push(default)` exports everything after it, so it is
+    reported as itself."""
+    out = set()
+    for f in _native_files(src_dir):
+        text = _blank_comments(f.read_text(encoding="utf-8", errors="replace"))
+        for m in _EXPORT.finditer(text):
+            name = _FUNC_NAME.search(text, m.end())
+            if name:
+                out.add(name.group(1))
+        if _VISIBILITY_PUSH.search(text):
+            out.add(f"#pragma GCC visibility push(default) in {f.name}")
+    return sorted(out)
+
+
+def registers_natives(src_dir) -> list:
+    """`file:line` of each RegisterNatives call, which would add JNI entry points the contract doesn't list."""
+    out = []
+    for f in _native_files(src_dir):
+        text = _blank_comments(f.read_text(encoding="utf-8", errors="replace"))
+        for m in re.finditer(r"\bRegisterNatives\b", text):
+            out.append(f"{f.name}:{text.count(chr(10), 0, m.start()) + 1}")
+    return out
+
+
+def cmake_hides_symbols(cmake_text) -> bool:
+    """Whether every library the CMake file compiles is compiled with -fvisibility=hidden (a target option, or a
+    hidden C visibility preset for the whole file). Imported, interface and alias libraries compile nothing."""
+    text = re.sub(r"#[^\n]*", "", cmake_text)
+    if re.search(r"\bCMAKE_C_VISIBILITY_PRESET\s+hidden\b", text):
+        return True
+    targets = [m.group(1) for m in re.finditer(r"\badd_library\s*\(\s*(\w+)([^)]*)\)", text)
+               if not re.search(r"\b(IMPORTED|INTERFACE|ALIAS)\b", m.group(2))]
+    if not targets:
+        return False
+    for target in targets:
+        options = " ".join(m.group(1) for m in re.finditer(
+            rf"\btarget_compile_options\s*\(\s*{re.escape(target)}\b([^)]*)\)", text))
+        if "-fvisibility=hidden" not in options or "-fvisibility=default" in options:
+            return False
+    return True
+
+
+def runtime_switch_problems(native_src, app_dirs, design_text, bridge_text) -> list:
+    """Every way the receiver could turn raw diagnostics on at run time (AIR-084(c)), as `file:line: what`.
+
+    Joins the no-runtime-switch checks so each finding names its file: a native export beyond the JNI contract's
+    entry points (and `JNI_OnLoad`), a `RegisterNatives` call, a Java `native` method outside the contract, and
+    every read `runtime_switch_reads` finds. An empty list means there is no runtime switch."""
+    found = []
+    contract = jni_contract_methods(design_text)
+    allowed = {"Java_parkcast_receiver_NativeBridge_" + name for name in contract} | {"JNI_OnLoad"}
+    # native_exports reports names only, so look each unexpected one up in the files to name where it is.
+    for name in sorted(set(native_exports(native_src)) - allowed):
+        hits = [f for f in _native_files(native_src)
+                if re.search(rf"\b{re.escape(name)}\b", f.read_text(encoding="utf-8", errors="replace"))]
+        where = ", ".join(f.as_posix() for f in hits) or Path(native_src).as_posix()
+        found.append(f"{where}: native export outside the JNI contract {name!r}")
+    found.extend(f"{hit}: RegisterNatives adds JNI entry points" for hit in registers_natives(native_src))
+    extra = java_native_methods(bridge_text) - contract
+    found.extend(f"NativeBridge.java: native method outside the JNI contract {m!r}" for m in sorted(extra))
+    found.extend(runtime_switch_reads(app_dirs, native_src))
+    return found
+
+
+def runtime_switch_reads(app_dirs, native_src) -> list:
+    """Every place the app could read a run-time switch for raw diagnostics, as `file:line: what`.
+
+    In the app's sources (comments blanked): any mention of raw diagnostics or the raw file; a shared preference,
+    Java system property, environment variable or Settings read; and any system-property key other than
+    ro.build.product. In the native sources: any environment or system-property read. The native code's own
+    build-time `PARKCAST_RAW_DIAG` and its raw file's name are not reads, so terms aren't checked there."""
+    found = []
+
+    def report(f, text, m, what):
+        found.append(f"{f.as_posix()}:{text.count(chr(10), 0, m.start()) + 1}: {what} {m.group(0)!r}")
+
+    for d in app_dirs:
+        for f in sorted(p for p in Path(d).rglob("*") if p.is_file() and p.suffix in _TEXT_SUFFIXES):
+            text = f.read_text(encoding="utf-8", errors="replace")
+            code = f.suffix in (".java", ".kt")
+            if code:
+                text = _blank_comments(text)
+            elif f.suffix == ".xml":
+                text = re.sub(r"<!--.*?-->", lambda c: re.sub(r"[^\n]", " ", c.group(0)), text, flags=re.S)
+            for m in RAW_DIAG_TERMS.finditer(text):
+                report(f, text, m, "raw diagnostics named")
+            if code:
+                for m in RUNTIME_SETTING_APIS.finditer(text):
+                    report(f, text, m, "runtime setting read")
+                for m in PROPERTY_LITERAL.finditer(text):
+                    if m.group(1) not in ALLOWED_PROPERTIES:
+                        report(f, text, m, "system property key")
+    for f in _native_files(native_src):
+        text = _blank_comments(f.read_text(encoding="utf-8", errors="replace"))
+        for m in NATIVE_RUNTIME_READS.finditer(text):
+            report(f, text, m, "native runtime read")
+    return found
 
 
 # ---------------------------------------------------------------------------------------------------------

@@ -54,6 +54,7 @@ int ring_generation(void) { return atomic_load(&g_gen); }
 void ring_next_generation(void) { atomic_fetch_add(&g_gen, 1); }
 uint32_t ring_au_drops(void) { return atomic_load(&g_au_drops); }
 uint32_t ring_log_withheld(void) { return atomic_load(&g_log_withheld); }
+uint32_t ring_control_drops(void) { return atomic_load(&g_control_drops); }
 
 static void entry_free(entry_t *e)
 {
@@ -98,16 +99,16 @@ static char *sanitise(const char *s)
     return out;
 }
 
-void ring_push(int gen, int kind, int a, int b, int64_t pts_ms, const char *text,
-               const unsigned char *data, int len)
+int ring_push(int gen, int kind, int a, int b, int64_t pts_ms, const char *text,
+              const unsigned char *data, int len)
 {
-    if (gen != atomic_load(&g_gen)) return;
+    if (gen != atomic_load(&g_gen)) return 0;
     entry_t e = { gen, kind, a, b, pts_ms, NULL, NULL, 0 };
-    if (text && !(e.text = sanitise(text))) return;
+    if (text && !(e.text = sanitise(text))) return 0;
     if (data && len > 0) {
         if (!(e.data = malloc((size_t)len))) {
             entry_free(&e);
-            return;
+            return 0;
         }
         memcpy(e.data, data, (size_t)len);
         e.len = len;
@@ -117,7 +118,7 @@ void ring_push(int gen, int kind, int a, int b, int64_t pts_ms, const char *text
     if (!g_open || gen != atomic_load(&g_gen)) {
         pthread_mutex_unlock(&g_lock);
         entry_free(&e);
-        return;
+        return 0;
     }
     if (g_count >= (bulk ? RING_GENERAL : RING_SLOTS)) {
         pthread_mutex_unlock(&g_lock);
@@ -125,12 +126,13 @@ void ring_push(int gen, int kind, int a, int b, int64_t pts_ms, const char *text
         else if (kind == PC_EV_LOG) atomic_fetch_add(&g_log_withheld, 1);
         else atomic_fetch_add(&g_control_drops, 1);
         entry_free(&e);
-        return;
+        return 0;
     }
     g_q[(g_head + g_count) % RING_SLOTS] = e;
     g_count++;
     pthread_cond_signal(&g_cond);
     pthread_mutex_unlock(&g_lock);
+    return 1;
 }
 
 static void deliver(JNIEnv *env, entry_t *e)

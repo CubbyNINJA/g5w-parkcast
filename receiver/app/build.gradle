@@ -89,6 +89,14 @@ def uxplayCommit() {
     throw new GradleException("parkcast: no commit line under [uxplay] in ${lock}")
 }
 
+// Raw diagnostics (AIR-084, OD-199) are a build-time choice only; there is no runtime switch. Absent or
+// "false" builds the normal receiver; "true" adds the native raw log and marks the build with "-rawdiag" in
+// its version name; any other value stops the build here, naming the value.
+def rawDiagProp = providers.gradleProperty('parkcast.rawDiagnostics').orNull
+if (rawDiagProp != null && rawDiagProp != 'true' && rawDiagProp != 'false')
+    throw new GradleException("parkcast: -Pparkcast.rawDiagnostics must be true or false, not '${rawDiagProp}'")
+def rawDiag = rawDiagProp == 'true'
+
 def gitCommit = providers.exec {
     commandLine 'git', 'rev-parse', 'HEAD'
     workingDir rootProject.projectDir
@@ -108,12 +116,20 @@ android {
         minSdk 19
         targetSdk 19
         versionCode 1
-        versionName '0.3.0'
+        versionName rawDiag ? '0.3.0-rawdiag' : '0.3.0'
         buildConfigField 'String', 'APP_VERSION', "\"${versionName}\""
         buildConfigField 'String', 'GIT_COMMIT', "\"${gitCommit}\""
         buildConfigField 'String', 'UXPLAY_COMMIT', "\"${uxplayCommit()}\""
         ndk {
             abiFilters 'armeabi-v7a'
+        }
+        if (buildNative) {
+            // A changed argument gives CMake a new configuration, so switching the property rebuilds libparkcast.
+            externalNativeBuild {
+                cmake {
+                    arguments "-DPARKCAST_RAW_DIAG=${rawDiag ? 'ON' : 'OFF'}"
+                }
+            }
         }
     }
 

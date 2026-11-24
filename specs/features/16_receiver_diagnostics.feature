@@ -42,6 +42,19 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Then the native sources export only the JNI contract's entry points
     And the app's sources read no setting, property or file that turns raw diagnostics on or off
 
+  @host @failure @AIR-084 @AT-84 @OD-199
+  Scenario Outline: The no-runtime-switch check flags a planted switch and names its file
+    Given a copy of the receiver's native and app sources with <plant>
+    When the no-runtime-switch check runs on the copy
+    Then it fails and names "<file>"
+
+    Examples:
+      | plant                                                                  | file           |
+      | an extra JNIEXPORT function in "parkcast_jni.c"                        | parkcast_jni.c |
+      | a RegisterNatives call in "parkcast_jni.c"                             | parkcast_jni.c |
+      | a getenv call in "rawdiag.c"                                           | rawdiag.c      |
+      | a read of the system property "parkcast.rawDiagnostics" in "ReceiverActivity.java" | ReceiverActivity.java |
+
   @offline @normal @AIR-084 @AT-84 @OD-199 @OD-204
   Scenario Outline: The keep check reports every reason that applies
     Given a fixture APK whose version name is "<version>" and whose library <library> the string "parkcast raw diagnostics on"
@@ -356,6 +369,19 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Then the check passes: every "logcat" call has no "-f" option and its output goes through a pipe straight into "grep", with no redirect before the pipe
 
   @offline @failure @AIR-089 @AT-89 @OD-202
+  Scenario Outline: The logcat check fails a script that breaks one of its rules
+    Given a fixture script whose one logcat call <breaks>
+    When the logcat check reads it
+    Then the check fails and names that call
+
+    Examples:
+      | breaks                                                                          |
+      | has a "-f" option, but is piped straight into grep                              |
+      | is redirected to a file before its pipe into grep                               |
+      | is piped into tee before grep                                                   |
+      | sits inside an if, after "then", and is redirected to a file before its pipe into grep |
+
+  @offline @failure @AIR-089 @AT-89 @OD-202
   Scenario: The logcat check catches a script that writes unfiltered logcat, overwrites it and deletes it
     Given a fixture script that redirects "logcat -d" to a file on the stick, overwrites that file with filtered lines, and deletes it
     When the logcat check reads it
@@ -401,6 +427,26 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     And both receiver logs are copied
     And the script exits non-zero
 
+  @offline @failure @AIR-089 @AT-89 @OD-206
+  Scenario: A copy that doesn't match its source is not left on the stick
+    Given a fake unit tree with ParkCast running and all three sources
+    And the fake "cp" copies only the first half of "receiver.log" and exits 0
+    When the parkcast-diag script runs from the fake stick
+    Then its log has a failure line naming "receiver.log"
+    And the run folder holds no "receiver.log"
+    And "uxplay-raw.log" and "receiver.log.1" are copied whole
+    And the script exits non-zero
+
+  @offline @failure @AIR-089 @AT-89 @OD-206
+  Scenario: The tool stops before reading anything while Android is still starting
+    Given a fake unit tree with ParkCast not running and all three sources
+    And the fake "getprop" gives "0" for "sys.boot_completed"
+    And the stick's root "NEMESIS.data" is the tool's own
+    When the parkcast-diag script runs from the fake stick
+    Then the root "NEMESIS.data" is gone
+    And the journal holds no source read, no copy and no "am" call
+    And the script exits non-zero
+
   @offline @failure @AIR-089 @AT-89 @OD-204
   Scenario: An output folder that already exists is left alone
     Given a fake unit tree with ParkCast running and all three sources
@@ -434,6 +480,13 @@ Feature: The diagnostic raw log: build switch, native raw file, counters and the
     Then the fake root's "runs/" folder holds the copied "uxplay-raw.log"
     And the only file written under the fake root's "docs/evidence/" is the summary
     And the summary does not hold "RAW-SENTINEL"
+
+  @offline @normal @AIR-075 @AIR-089 @AT-75 @AT-89
+  Scenario: The evaluator reads "receiver.log.1" before "receiver.log", as one log
+    Given a complete synthetic GO run with the owner note "picture: yes"
+    And its log split in the middle of its session into an older "receiver.log.1" and a newer "receiver.log"
+    When the evaluator judges the split folder and the same log as one "receiver.log"
+    Then both are GO with the same summary and cited lines
 
   @offline @boundary @AIR-089 @AIR-075 @AIR-076 @AT-89 @AT-75 @AT-76
   Scenario: The raw file can't supply evidence the receiver's log lacks

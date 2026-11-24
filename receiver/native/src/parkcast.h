@@ -1,5 +1,5 @@
 /*
- * ParkCast native receiver (S3): shared declarations for parkcast_jni.c, host.c and ring.c.
+ * ParkCast native receiver (S3): shared declarations for parkcast_jni.c, host.c, logpath.c, rawdiag.c and ring.c.
  * docs/design/S3_RECEIVER.md, "Threads" and "JNI contract".
  */
 #ifndef PARKCAST_H
@@ -35,11 +35,13 @@ void ring_close(void);                 /* closes the ring, drops what is queued,
 int  ring_on_delivery_thread(void);
 int  ring_generation(void);
 void ring_next_generation(void);
-/* Copies text and data. Dropped when the ring is closed or gen is not the current generation. */
-void ring_push(int gen, int kind, int a, int b, int64_t pts_ms, const char *text,
+/* Copies text and data. Dropped when the ring is closed or gen is not the current generation, or when the
+ * slots for its kind are full. Returns 1 when the event was queued, 0 on every other path. */
+int  ring_push(int gen, int kind, int a, int b, int64_t pts_ms, const char *text,
                const unsigned char *data, int len);
 uint32_t ring_au_drops(void);
 uint32_t ring_log_withheld(void);
+uint32_t ring_control_drops(void);
 
 /* host.c: the staged start and stop over UxPlay. The result is written as "ok <token>" / "fail <token>". */
 void host_start(int stage, const char *keyfile, const char *address, int width, int height, int fps,

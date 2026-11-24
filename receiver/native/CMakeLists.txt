@@ -165,10 +165,16 @@ target_link_libraries(parkcast_uxplay PUBLIC parkcast_ssl parkcast_crypto parkca
 set(PARKCAST_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/parkcast_jni.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/host.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/logpath.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/rawdiag.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ring.c")
+# AIR-084: the diagnostic raw log (uxplay-raw.log) is compiled in only with this on; the app's Gradle
+# property parkcast.rawDiagnostics sets it.
+option(PARKCAST_RAW_DIAG "Write UxPlay's redacted raw log to uxplay-raw.log (AIR-084 to AIR-088)" OFF)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/host.c")
   add_library(parkcast SHARED ${PARKCAST_SOURCES})
   target_include_directories(parkcast PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_compile_definitions(parkcast PRIVATE PARKCAST_RAW_DIAG=$<IF:$<BOOL:${PARKCAST_RAW_DIAG}>,1,0>)
   target_compile_options(parkcast PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden)
   target_link_libraries(parkcast PRIVATE parkcast_uxplay parkcast_ssl parkcast_crypto parkcast_plist dl)
   # API 19's loader (Open on-unit risks, "Loader"): no packed relocations, no RELR, no DT_RUNPATH, and every
